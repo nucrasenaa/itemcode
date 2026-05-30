@@ -190,7 +190,7 @@ def send_discord(message, force=False):
         return False
         
     payload = {
-        "username": "TalesRunner OCR Bot",
+        "username": "TalesRunner Bot",
         "content": message
     }
         
@@ -385,7 +385,7 @@ def ocr_and_redeem_logic(image_path, config):
                                     item_names = [name for name in item_names if name]
                                     item_details = ",".join(item_names)
                                     if item_details:
-                                        retry_message_to_send = f"{bundle_name}\n{item_details}"
+                                        retry_message_to_send = f"{item_details}"
                                     else:
                                         retry_message_to_send = f"{bundle_name}"
                             send_telegram(retry_message_to_send)
@@ -421,7 +421,7 @@ def ocr_and_redeem_logic(image_path, config):
                                     item_names = [name for name in item_names if name]
                                     item_details = ",".join(item_names)
                                     if item_details:
-                                        message_to_send = f"{var}\n{bundle_name}\n{item_details}"
+                                        message_to_send = f"{var}\n{item_details}"
                                     else:
                                         message_to_send = f"{var}\n{bundle_name}"
 

@@ -643,7 +643,7 @@ async function sendDiscord(message, redeemResult = null) {
     }
 
     const payload = {
-        username: "TalesRunner OCR Bot",
+        username: "TalesRunner Bot",
         content: message
     };
 
@@ -1007,7 +1007,7 @@ async function processScan(directUrl) {
                                         const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
                                         const itemDetails = itemNames.join(",");
                                         if (itemDetails) {
-                                            retryMessageToSend = `${bundleName}\n${itemDetails}`;
+                                            retryMessageToSend = `${itemDetails}`;
                                         } else {
                                             retryMessageToSend = `${bundleName}`;
                                         }
@@ -1056,7 +1056,7 @@ async function processScan(directUrl) {
                                         const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
                                         const itemDetails = itemNames.join(",");
                                         if (itemDetails) {
-                                            messageToSend = `${varCode}\n${bundleName}\n${itemDetails}`;
+                                            messageToSend = `${varCode}\n${itemDetails}`;
                                         } else {
                                             messageToSend = `${varCode}\n${bundleName}`;
                                         }
