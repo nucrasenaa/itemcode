@@ -1,0 +1,20 @@
+{
+  "youtube_url": "https://www.youtube.com/@thehof.talesrunner",
+  "discord_webhook_url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL",
+  "discord_enabled": false,
+  "telegram_token": "YOUR_BOT_TOKEN",
+  "telegram_chat_id": "YOUR_CHAT_ID",
+  "telegram_enabled": true,
+  "scan_interval": 10.0,
+  "regex_pattern": "\\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{8,24}\\b",
+  "history_file": "ocr_history.json",
+  "ytdl_path_mac": "/opt/homebrew/bin/yt-dlp",
+  "ytdl_path_win": "%LOCALAPPDATA%\\Programs\\Python\\Python311\\Scripts\\yt-dlp.exe",
+  "ffmpeg_path_mac": "/opt/homebrew/bin/ffmpeg",
+  "ffmpeg_path_win": "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe",
+  "ocr_helper_path_mac": "./ocr_helper",
+  "ocr_helper_path_win": "%USERPROFILE%\\Documents\\itemcode\\ocr_helper.ps1",
+  "username": "YOUR_HOF_USERNAME",
+  "password": "YOUR_HOF_PASSWORD",
+  "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2"
+}
