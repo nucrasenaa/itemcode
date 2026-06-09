@@ -628,7 +628,7 @@ async function sendTelegram(message, redeemResult = null) {
 // Send Discord Webhook Notification
 async function sendDiscord(message, redeemResult = null) {
     const isEnabled = config.discord_enabled !== undefined ? !!config.discord_enabled : !!config.discord_webhook_url;
-    if (!isEnabled || !config.discord_webhook_url) {
+    if (!isEnabled) {
         return false;
     }
 
@@ -642,27 +642,43 @@ async function sendDiscord(message, redeemResult = null) {
         }
     }
 
+    // Support both single string (comma-separated) and array of URLs
+    let urls = [];
+    if (Array.isArray(config.discord_webhook_url)) {
+        urls = config.discord_webhook_url.filter(Boolean);
+    } else if (typeof config.discord_webhook_url === 'string') {
+        urls = config.discord_webhook_url.split(',').map(u => u.trim()).filter(Boolean);
+    }
+
+    if (urls.length === 0) {
+        return false;
+    }
+
     const payload = {
         username: "TalesRunner Bot",
         content: message
     };
 
-    try {
-        const res = await fetch(config.discord_webhook_url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (res.ok) {
-            log(`[+] Discord Notification sent!`);
-        } else {
-            const txt = await res.text();
-            log(`[-] Discord Webhook returned failure (HTTP ${res.status}): ${txt}`);
+    let sentAny = false;
+    for (const url of urls) {
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                log(`[+] Discord Notification sent to ${url.substring(0, 45)}...`);
+                sentAny = true;
+            } else {
+                const txt = await res.text();
+                log(`[-] Discord Webhook (${url.substring(0, 45)}...) returned failure (HTTP ${res.status}): ${txt}`);
+            }
+        } catch (e) {
+            log(`[-] Discord network error for ${url.substring(0, 45)}...: ${e.message}`);
         }
-    } catch (e) {
-        log(`[-] Discord network error: ${e.message}`);
     }
-    return true;
+    return sentAny;
 }
 
 // Parse wait time from message
@@ -1294,7 +1310,8 @@ async function main() {
     log(`  ช่อง/วิดีโอเป้าหมาย: ${config.youtube_url}`);
     log(`  ความถี่ในการสแกน: ${config.scan_interval} วินาที`);
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
-    log(`  แจ้งเตือน Discord: ${config.discord_webhook_url ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    const hasDiscord = Array.isArray(config.discord_webhook_url) ? config.discord_webhook_url.length > 0 : !!config.discord_webhook_url;
+    log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     log(`==================================================\n`);
 
     // Auto login if credentials provided in configuration
