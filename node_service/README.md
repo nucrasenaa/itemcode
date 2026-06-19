@@ -1,7 +1,7 @@
 # 🎮 TalesRunner ItemCode Watcher — Headless Node.js Service
 
 ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รวดเร็วและกินทรัพยากรเครื่องน้อยมาก  
-รองรับทั้ง **macOS** และ **Windows** พร้อมแจ้งเตือนผ่าน **Telegram** และ **Discord**
+รองรับทั้ง **macOS**, **Windows** และ **Ubuntu/Linux VPS** พร้อมแจ้งเตือนผ่าน **Telegram** และ **Discord**
 
 ---
 
@@ -10,7 +10,7 @@
 * 🔑 **ตรวจสอบโค้ดอัตโนมัติ (Check Serial):** ยิงเช็ค API ของ HOF ทันทีเพื่อดูความถูกต้องและรางวัล
 * 📲 **ระบบแจ้งเตือนด่วน:** ส่งรหัสเข้า Telegram/Discord ทันทีที่พบเพื่อให้สามารถกดเคลมเองได้สะดวก
 * ⏳ **Rate-limit / Captcha Handling:** รอและจัดระบบล็อกอิน (Re-auth) อัตโนมัติเมื่อชนขีดจำกัด
-* 🖥️ **Cross-platform:** ใช้ Apple Vision Framework บน macOS (Swift) และ WinRT OCR บน Windows
+* 🖥️ **Cross-platform:** ใช้ Apple Vision Framework บน macOS, WinRT OCR บน Windows และ Tesseract OCR บน Linux
 
 ---
 
@@ -31,6 +31,17 @@
 1. เปิด PowerShell (หรือคลิกขวาที่ไฟล์) แล้วรัน:
    ```powershell
    powershell -ExecutionPolicy Bypass -File install_win.ps1
+   ```
+
+### Linux (Ubuntu Server)
+1. เปิด Terminal เข้ามาในโฟลเดอร์นี้:
+   ```bash
+   cd node_service
+   ```
+2. รันสคริปต์ติดตั้งด้วยสิทธิ์ root:
+   ```bash
+   chmod +x install_linux.sh
+   sudo ./install_linux.sh
    ```
 
 ---

@@ -58,6 +58,7 @@ class CookieJar {
 }
 
 const isWindows = process.platform === 'win32';
+const isLinux = process.platform === 'linux';
 
 // Expand path variables: ${HOMEDIR} → os.homedir(), %VAR% → process.env.VAR
 function expandPathVars(str) {
@@ -72,6 +73,22 @@ function expandPathVars(str) {
 }
 
 function adjustPathsForOS() {
+    if (isLinux) {
+        config.ytdl_path = config.ytdl_path_linux || config.ytdl_path || 'yt-dlp';
+        config.ffmpeg_path = config.ffmpeg_path_linux || config.ffmpeg_path || 'ffmpeg';
+        config.ocr_helper_path = config.ocr_helper_path_linux || config.ocr_helper_path || 'tesseract';
+
+        config.ytdl_path = expandPathVars(config.ytdl_path);
+        config.ffmpeg_path = expandPathVars(config.ffmpeg_path);
+        config.ocr_helper_path = expandPathVars(config.ocr_helper_path);
+
+        log(`[*] OS detected: Linux`);
+        log(`[*]   yt-dlp     → ${config.ytdl_path}`);
+        log(`[*]   ffmpeg     → ${config.ffmpeg_path}`);
+        log(`[*]   ocr_helper → ${config.ocr_helper_path}`);
+        return;
+    }
+
     const osSuffix = isWindows ? '_win' : '_mac';
     const fallbackSuffix = isWindows ? '_mac' : '_win';
 
@@ -819,6 +836,28 @@ async function captureFrame(directUrl, outputPath) {
 
 // Run OCR on image and return lines
 async function runOcr(imagePath) {
+    if (isLinux) {
+        const tesseractBinary = config.ocr_helper_path || 'tesseract';
+        try {
+            let stdout;
+            try {
+                // Try executing with both Thai and English support
+                const res = await execFileAsync(tesseractBinary, [imagePath, 'stdout', '-l', 'tha+eng', '--psm', '6'], { timeout: 10000 });
+                stdout = res.stdout;
+            } catch (e) {
+                // Fallback to default language configuration
+                const res = await execFileAsync(tesseractBinary, [imagePath, 'stdout', '--psm', '6'], { timeout: 10000 });
+                stdout = res.stdout;
+            }
+            return stdout.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+        } catch (e) {
+            log(`[-] Linux Tesseract OCR failed: ${e.message}. Ensure 'tesseract-ocr' is installed.`);
+            return [];
+        }
+    }
+
     const ocrPath = config.ocr_helper_path || path.join(__dirname, 'ocr_helper.ps1');
 
     if (isWindows && ocrPath.endsWith('.ps1')) {
