@@ -106,7 +106,6 @@ function adjustPathsForOS() {
                 config[base] = expandPathVars(config[fbKey]);
             }
         }
-    }
 
     log(`[*]   yt-dlp     → ${config.ytdl_path}`);
     log(`[*]   ffmpeg     → ${config.ffmpeg_path}`);
