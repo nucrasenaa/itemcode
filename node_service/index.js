@@ -24,6 +24,8 @@ let history = new Set();
 let isRunning = true;
 let accessToken = null;
 let currentLoggedInUser = null;
+let isAutoLoginDisabled = false;
+let hasNotifiedTokenExpired = false;
 let lastPeriodicSleepTime = Date.now();
 
 // Logger
@@ -58,6 +60,7 @@ class CookieJar {
 }
 
 const isWindows = process.platform === 'win32';
+const isMac = process.platform === 'darwin';
 const isLinux = process.platform === 'linux';
 
 // Expand path variables: ${HOMEDIR} → os.homedir(), %VAR% → process.env.VAR
@@ -73,16 +76,16 @@ function expandPathVars(str) {
 }
 
 function adjustPathsForOS() {
-    if (isLinux) {
-        config.ytdl_path = config.ytdl_path_linux || config.ytdl_path || 'yt-dlp';
-        config.ffmpeg_path = config.ffmpeg_path_linux || config.ffmpeg_path || 'ffmpeg';
-        config.ocr_helper_path = config.ocr_helper_path_linux || config.ocr_helper_path || 'tesseract';
+    const platform = isWindows ? 'Windows' : (isMac ? 'macOS' : (isLinux ? 'Linux' : process.platform));
+    log(`[*] OS detected: ${platform}`);
 
+    if (isLinux) {
+        config.ytdl_path = config.ytdl_path_linux || (config.ytdl_path && !config.ytdl_path.includes('/homebrew/') ? config.ytdl_path : 'yt-dlp');
+        config.ffmpeg_path = config.ffmpeg_path_linux || (config.ffmpeg_path && !config.ffmpeg_path.includes('/homebrew/') ? config.ffmpeg_path : 'ffmpeg');
+        config.ocr_helper_path = config.ocr_helper_path_linux || (config.ocr_helper_path && config.ocr_helper_path !== './ocr_helper' ? config.ocr_helper_path : 'tesseract');
         config.ytdl_path = expandPathVars(config.ytdl_path);
         config.ffmpeg_path = expandPathVars(config.ffmpeg_path);
         config.ocr_helper_path = expandPathVars(config.ocr_helper_path);
-
-        log(`[*] OS detected: Linux`);
         log(`[*]   yt-dlp     → ${config.ytdl_path}`);
         log(`[*]   ffmpeg     → ${config.ffmpeg_path}`);
         log(`[*]   ocr_helper → ${config.ocr_helper_path}`);
@@ -92,20 +95,19 @@ function adjustPathsForOS() {
     const osSuffix = isWindows ? '_win' : '_mac';
     const fallbackSuffix = isWindows ? '_mac' : '_win';
 
-    // Auto-select per-OS paths from config keys like ytdl_path_mac / ytdl_path_win
-    for (const base of ['ytdl_path', 'ffmpeg_path', 'ocr_helper_path']) {
-        const osKey   = `${base}${osSuffix}`;
-        const fbKey   = `${base}${fallbackSuffix}`;
-        if (config[osKey]) {
-            config[base] = expandPathVars(config[osKey]);
-        } else if (!config[base] && config[fbKey]) {
-            // No generic key and no OS key — use the other OS as last resort
-            config[base] = expandPathVars(config[fbKey]);
+        // Auto-select per-OS paths from config keys like ytdl_path_mac / ytdl_path_win
+        for (const base of ['ytdl_path', 'ffmpeg_path', 'ocr_helper_path']) {
+            const osKey   = `${base}${osSuffix}`;
+            const fbKey   = `${base}${fallbackSuffix}`;
+            if (config[osKey]) {
+                config[base] = expandPathVars(config[osKey]);
+            } else if (!config[base] && config[fbKey]) {
+                // No generic key and no OS key — use the other OS as last resort
+                config[base] = expandPathVars(config[fbKey]);
+            }
         }
     }
 
-    const platform = isWindows ? 'Windows' : 'macOS';
-    log(`[*] OS detected: ${platform}`);
     log(`[*]   yt-dlp     → ${config.ytdl_path}`);
     log(`[*]   ffmpeg     → ${config.ffmpeg_path}`);
     log(`[*]   ocr_helper → ${config.ocr_helper_path}`);
@@ -147,6 +149,67 @@ function loadConfig() {
     adjustPathsForOS();
 }
 
+const SESSION_FILE = path.join(__dirname, '.session_config.json');
+
+function loadSession() {
+    try {
+        if (fs.existsSync(SESSION_FILE)) {
+            const data = fs.readFileSync(SESSION_FILE, 'utf8');
+            const sess = JSON.parse(data);
+            if (sess.access_token) {
+                accessToken = sess.access_token;
+                currentLoggedInUser = sess.username || config.username || "SessionUser";
+                return sess.access_token;
+            }
+        }
+    } catch (e) {
+        log(`[-] Error loading session: ${e.message}`);
+    }
+    return null;
+}
+
+function saveSession(token, username = "") {
+    try {
+        const sessData = {
+            access_token: token,
+            game_id: config.game_id || "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
+            username: username || config.username || ""
+        };
+        fs.writeFileSync(SESSION_FILE, JSON.stringify(sessData, null, 4), 'utf8');
+        isAutoLoginDisabled = false;
+        hasNotifiedTokenExpired = false;
+        log(`[+] บันทึก Session Token ลงใน .session_config.json เรียบร้อยแล้ว`);
+    } catch (e) {
+        log(`[-] Error saving session: ${e.message}`);
+    }
+}
+
+async function notifyTokenExpired() {
+    if (hasNotifiedTokenExpired) return;
+    hasNotifiedTokenExpired = true;
+    const msg = `⚠️ *[TalesRunner Watcher Alert]*\n\n🔒 *Access Token หมดอายุแล้ว!*\n\nระบบไม่สามารถทำการเคลมโค้ดไอเทมอัตโนมัติได้ กรุณาล็อกอินผ่านเบราว์เซอร์แล้วนำ Bearer Token ใหม่มาตั้งค่าด้วยคำสั่ง:\n\`node index.js --set-token <YOUR_BEARER_TOKEN>\``;
+    log(`[!] ส่งการแจ้งเตือน Telegram / Discord: Token หมดอายุแล้ว`);
+    await sendTelegram(msg);
+    await sendDiscord(msg);
+}
+
+async function verifyToken(token) {
+    if (!token) return false;
+    try {
+        const pendingUrl = `${API_BASE_URL}/me/topup/games/${config.game_id || 'ece25107-ec4f-4c83-9f2b-38afd0e77cc2'}/orders/pending`;
+        const res = await fetch(pendingUrl, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'application/json',
+                'Origin': `https://${MEMBER_DOMAIN}`
+            }
+        });
+        return res.status !== 401;
+    } catch (e) {
+        return false;
+    }
+}
+
 // Load History
 function loadHistory() {
     const historyFile = config.history_file || 'ocr_history.json';
@@ -176,6 +239,20 @@ function saveHistory() {
     }
 }
 
+const BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+};
+
 // Log in via Username/Password and perform PKCE Token Exchange in Node.js
 async function loginWithCredentials(username, password) {
     username = username || config.username || "";
@@ -191,15 +268,13 @@ async function loginWithCredentials(username, password) {
         const state = crypto.randomBytes(12).toString('base64url');
 
         // 2. GET /oauth/authorize → server stores OAuth session context → redirects to login page
-        //    (This flow is confirmed working in Python tests with nucrasenaa)
         const authUrl = `${PASSPORT_BASE_URL}/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
 
         let currentUrl = authUrl;
         let currentAuthRes = await fetch(currentUrl, {
             headers: {
-                'User-Agent': USER_AGENT,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'th,en-GB;q=0.9,en-US;q=0.8,en;q=0.7'
+                ...BROWSER_HEADERS,
+                'Sec-Fetch-Site': 'none'
             },
             redirect: 'manual'
         });
@@ -210,13 +285,14 @@ async function loginWithCredentials(username, password) {
         while (currentAuthRes.status >= 300 && currentAuthRes.status < 400 && authHops < 10) {
             const location = currentAuthRes.headers.get('location');
             if (!location) break;
+            const prevUrl = currentUrl;
             currentUrl = location.startsWith('http') ? location : new URL(location, PASSPORT_BASE_URL).toString();
             currentAuthRes = await fetch(currentUrl, {
                 method: 'GET',
                 headers: {
+                    ...BROWSER_HEADERS,
                     'Cookie': cookieJar.getCookieHeader(),
-                    'User-Agent': USER_AGENT,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    'Referer': prevUrl
                 },
                 redirect: 'manual'
             });
@@ -254,13 +330,11 @@ async function loginWithCredentials(username, password) {
         const loginRes = await fetch(loginAction, {
             method: 'POST',
             headers: {
+                ...BROWSER_HEADERS,
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Cookie': cookieJar.getCookieHeader(),
-                'User-Agent': USER_AGENT,
                 'Origin': PASSPORT_BASE_URL,
-                'Referer': loginPageUrl,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'th,en-GB;q=0.9,en-US;q=0.8,en;q=0.7'
+                'Referer': loginPageUrl
             },
             body: bodyParams.toString(),
             redirect: 'manual'
@@ -277,6 +351,7 @@ async function loginWithCredentials(username, password) {
             const location = loginFollowRes.headers.get('location');
             if (!location) break;
 
+            const prevLoginUrl = finalUrl;
             finalUrl = location.startsWith('http') ? location : new URL(location, PASSPORT_BASE_URL).toString();
             log(`[DEBUG] Login redirect hop ${loginHops + 1}: ${finalUrl.substring(0, 80)}`);
 
@@ -289,10 +364,9 @@ async function loginWithCredentials(username, password) {
             loginFollowRes = await fetch(finalUrl, {
                 method: 'GET',
                 headers: {
+                    ...BROWSER_HEADERS,
                     'Cookie': cookieJar.getCookieHeader(),
-                    'User-Agent': USER_AGENT,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Referer': PASSPORT_BASE_URL
+                    'Referer': prevLoginUrl
                 },
                 redirect: 'manual'
             });
@@ -310,15 +384,19 @@ async function loginWithCredentials(username, password) {
             const ok = await exchangeCodeWithVerifier(authCode, codeVerifier);
             if (ok) {
                 currentLoggedInUser = username;
+                isAutoLoginDisabled = false;
                 return true;
             }
+            isAutoLoginDisabled = true;
             return false;
         } else {
             log(`[-] Node: เข้าสู่ระบบล้มเหลว หรือไม่พบ Auth Code ใน URL เปลี่ยนเส้นทาง: ${finalUrl}`);
+            isAutoLoginDisabled = true;
             return false;
         }
     } catch (e) {
         log(`[-] Node: เกิดข้อผิดพลาดระหว่างล็อกอิน: ${e.message}`);
+        isAutoLoginDisabled = true;
         return false;
     }
 }
@@ -349,6 +427,7 @@ async function exchangeCodeWithVerifier(authCode, codeVerifier) {
             accessToken = resData.access_token;
             if (accessToken) {
                 log(`[+] Node: ได้รับ Access Token เรียบร้อย! (${accessToken.substring(0, 15)}...)`);
+                saveSession(accessToken, currentLoggedInUser);
                 return true;
             } else {
                 log(`[-] Node: การแลกเปลี่ยนสำเร็จแต่ไม่มี access_token ในระบบ`);
@@ -491,11 +570,16 @@ async function redeemCodeInner(serial, username = null, password = null) {
     const targetUsername = username || config.username || "";
     const targetPassword = password || config.password || "";
 
-    if (!accessToken || currentLoggedInUser !== targetUsername) {
-        log(`[*] Node: Token ปัจจุบันไม่ได้เป็นของ ${targetUsername} หรือไม่มี Token, กำลังเข้าสู่ระบบใหม่...`);
-        const success = await loginWithCredentials(targetUsername, targetPassword);
-        if (!success) {
-            return { success: false, message: "กรุณาเข้าสู่ระบบก่อน" };
+    if (!accessToken) {
+        if (!isAutoLoginDisabled) {
+            log(`[*] Node: ไม่มี Token ในระบบ กำลังพยายามเข้าสู่ระบบ...`);
+            const success = await loginWithCredentials(targetUsername, targetPassword);
+            if (!success) {
+                isAutoLoginDisabled = true;
+                return { success: false, message: "ไม่มี Access Token ที่ใช้งานได้ (โปรดอัปเดต Token ด้วย --set-token)" };
+            }
+        } else {
+            return { success: false, message: "ไม่มี Access Token ที่ใช้งานได้" };
         }
     }
 
@@ -533,23 +617,29 @@ async function redeemCodeInner(serial, username = null, password = null) {
 
         // Auto re-authenticate on 401 Unauthorized
         if (responseCheck.status === 401) {
-            log(`[!] Node: พบสถานะ 401 (Unauthorized) กำลังเข้าสู่ระบบใหม่โดยอัตโนมัติ...`);
-            const success = await loginWithCredentials(targetUsername, targetPassword);
-            if (success) {
-                log(`[+] Node: ออโต้ล็อกอินสำเร็จ! กำลังทดลองส่งโค้ดใหม่อีกครั้ง...`);
-                headers['Authorization'] = `Bearer ${accessToken}`;
-                // Retry Step 1
-                try {
-                    await fetch(pendingUrl, { headers });
-                } catch (e) { }
-                // Retry Step 2
-                responseCheck = await fetch(checkUrl, {
-                    method: 'POST',
-                    headers: headers,
-                    body: JSON.stringify(payloadCheck)
-                });
+            log(`[!] Node: พบสถานะ 401 (Unauthorized Token หมดอายุ)`);
+            await notifyTokenExpired();
+            if (!isAutoLoginDisabled) {
+                const success = await loginWithCredentials(targetUsername, targetPassword);
+                if (success) {
+                    log(`[+] Node: ออโต้ล็อกอินสำเร็จ! กำลังทดลองส่งโค้ดใหม่อีกครั้ง...`);
+                    headers['Authorization'] = `Bearer ${accessToken}`;
+                    // Retry Step 1
+                    try {
+                        await fetch(pendingUrl, { headers });
+                    } catch (e) { }
+                    // Retry Step 2
+                    responseCheck = await fetch(checkUrl, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(payloadCheck)
+                    });
+                } else {
+                    isAutoLoginDisabled = true;
+                    return { success: false, checkSuccess: false, message: "Unauthorized (Token หมดอายุ)" };
+                }
             } else {
-                return { success: false, checkSuccess: false, message: "Unauthorized" };
+                return { success: false, checkSuccess: false, message: "Unauthorized (Token หมดอายุ)" };
             }
         }
 
@@ -836,29 +926,7 @@ async function captureFrame(directUrl, outputPath) {
 
 // Run OCR on image and return lines
 async function runOcr(imagePath) {
-    if (isLinux) {
-        const tesseractBinary = config.ocr_helper_path || 'tesseract';
-        try {
-            let stdout;
-            try {
-                // Try executing with both Thai and English support
-                const res = await execFileAsync(tesseractBinary, [imagePath, 'stdout', '-l', 'tha+eng', '--psm', '6'], { timeout: 10000 });
-                stdout = res.stdout;
-            } catch (e) {
-                // Fallback to default language configuration
-                const res = await execFileAsync(tesseractBinary, [imagePath, 'stdout', '--psm', '6'], { timeout: 10000 });
-                stdout = res.stdout;
-            }
-            return stdout.split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0);
-        } catch (e) {
-            log(`[-] Linux Tesseract OCR failed: ${e.message}. Ensure 'tesseract-ocr' is installed.`);
-            return [];
-        }
-    }
-
-    const ocrPath = config.ocr_helper_path || path.join(__dirname, 'ocr_helper.ps1');
+    const ocrPath = config.ocr_helper_path || (isWindows ? path.join(__dirname, 'ocr_helper.ps1') : 'tesseract');
 
     if (isWindows && ocrPath.endsWith('.ps1')) {
         if (!fs.existsSync(ocrPath)) {
@@ -877,6 +945,30 @@ async function runOcr(imagePath) {
                 .filter(line => line.length > 0);
         } catch (e) {
             log(`[-] PowerShell OCR script run failed: ${e.message}`);
+            return [];
+        }
+    } else if (isLinux || ocrPath.toLowerCase().includes('tesseract')) {
+        try {
+            const { stdout } = await execFileAsync(ocrPath, [imagePath, 'stdout', '-l', 'tha+eng'], { timeout: 15000 });
+            return stdout.split('\n')
+                .map(line => line.trim())
+                .filter(line => line.length > 0);
+        } catch (e) {
+            if (e.message.includes('Error opening data file') || e.message.includes('tha.traineddata')) {
+                try {
+                    log(`[!] Warning: Tesseract Thai language pack not found. Falling back to English only.`);
+                    const { stdout } = await execFileAsync(ocrPath, [imagePath, 'stdout', '-l', 'eng'], { timeout: 15000 });
+                    return stdout.split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line.length > 0);
+                } catch (err) {
+                    log(`[-] Tesseract OCR execution fallback failed: ${err.message}`);
+                    return [];
+                }
+            }
+            log(`[-] OCR Error: Tesseract execution failed: ${e.message}`);
+            log(`[-] On Linux (Debian/Ubuntu), make sure it is installed:`);
+            log(`[-]   sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng`);
             return [];
         }
     } else {
@@ -1353,15 +1445,69 @@ async function main() {
     log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     log(`==================================================\n`);
 
-    // Auto login if credentials provided in configuration
-    if (config.username && config.password) {
-        log(`[*] พบข้อมูลล็อกอินในค่าตั้งค่า กำลังเชื่อมต่อเข้า HOF...`);
-        const loginSuccess = await loginWithCredentials(config.username, config.password);
-        if (loginSuccess) {
-            log(`[+] เชื่อมต่อบัญชีผู้ใช้ HOF สำเร็จ! ระบบจะทำการเคลมโค้ดอัตโนมัติ`);
+    // Check CLI argument for manual token setting
+    const tokenArgIdx = process.argv.findIndex(arg => arg === '--set-token' || arg === '--token');
+    if (tokenArgIdx !== -1 && process.argv[tokenArgIdx + 1]) {
+        const rawToken = process.argv[tokenArgIdx + 1].replace("Bearer ", "").trim();
+        log(`[*] กำลังบันทึก Access Token ใหม่จากคำสั่ง...`);
+        saveSession(rawToken, config.username || "ManualUser");
+        accessToken = rawToken;
+    }
+
+    // 1. Try loading existing session token
+    const savedToken = loadSession();
+    let primaryLoginSuccess = false;
+
+    if (savedToken) {
+        log(`[*] พบ Session Token ที่เคยบันทึกไว้ กำลังตรวจสอบความถูกต้อง...`);
+        const isValid = await verifyToken(savedToken);
+        if (isValid) {
+            log(`[+] Session Token ใช้งานได้ปกติ! ข้ามการล็อกอินผ่าน Cloudflare`);
+            primaryLoginSuccess = true;
         } else {
-            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้ (ระบบจะทำการแจ้งเตือนโค้ดอย่างเดียว)`);
+            log(`[-] Session Token เดิมหมดอายุแล้ว`);
         }
+    }
+
+    // 2. Auto login if no valid session token exists and credentials provided
+    if (!primaryLoginSuccess && config.username && config.password) {
+        log(`[*] พบข้อมูลล็อกอินในค่าตั้งค่า กำลังเชื่อมต่อเข้า HOF...`);
+        primaryLoginSuccess = await loginWithCredentials(config.username, config.password);
+        if (primaryLoginSuccess) {
+            log(`[+] เชื่อมต่อบัญชีผู้ใช้ HOF สำเร็จ! (${config.username}) ระบบจะทำการเคลมโค้ดอัตโนมัติ`);
+        } else {
+            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้เนื่องจากติด Cloudflare Security Verification`);
+            log(`[💡] คำแนะนำ: กรุณาล็อกอินผ่านเบราว์เซอร์ แล้วนำ Bearer Token มาตั้งค่าด้วยคำสั่ง:`);
+            log(`     node index.js --set-token <YOUR_BEARER_TOKEN>`);
+            await notifyTokenExpired();
+        }
+    } else if (!primaryLoginSuccess) {
+        await notifyTokenExpired();
+    }
+
+    if (process.argv.includes('--test-login')) {
+        log(`\n==================================================`);
+        log(`[🧪] โหมดทดสอบการล็อกอิน (--test-login)`);
+        log(`[1] บัญชีหลัก (${config.username || 'ไม่ได้ระบุ'}): ${primaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว (ติด Cloudflare Verification)'}`);
+        
+        if (config.username2 && config.password2) {
+            log(`[*] กำลังทดสอบล็อกอินบัญชีสำรอง (${config.username2})...`);
+            const secSuccess = await loginWithCredentials(config.username2, config.password2);
+            log(`[2] บัญชีสำรอง (${config.username2}): ${secSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
+        }
+        log(`==================================================`);
+        process.exit(primaryLoginSuccess ? 0 : 1);
+    }
+
+    const redeemArgIdx = process.argv.findIndex(arg => arg === '--redeem' || arg === '--check');
+    if (redeemArgIdx !== -1 && process.argv[redeemArgIdx + 1]) {
+        const testCode = process.argv[redeemArgIdx + 1].trim().toUpperCase();
+        log(`\n==================================================`);
+        log(`[🎯] โหมดทดสอบตรวจสอบรหัสไอเทมโค้ด: ${testCode}`);
+        log(`==================================================`);
+        const result = await redeemCode(testCode);
+        log(`[RESULT] ผลลัพธ์: ${JSON.stringify(result, null, 2)}`);
+        process.exit(result.success || result.checkSuccess ? 0 : 1);
     }
 
     const targetUrl = config.youtube_url;

@@ -33,15 +33,22 @@
    powershell -ExecutionPolicy Bypass -File install_win.ps1
    ```
 
-### Linux (Ubuntu Server)
-1. เปิด Terminal เข้ามาในโฟลเดอร์นี้:
+### Linux (VPS / Ubuntu Server)
+1. ติดตั้งแพ็กเกจระบบที่จำเป็น (Tesseract OCR, FFmpeg และ yt-dlp):
+   * สำหรับ Debian/Ubuntu (เช่น Ubuntu 20.04+):
+     ```bash
+     sudo apt-get update
+     sudo apt-get install -y tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng ffmpeg
+     ```
+   * ติดตั้ง `yt-dlp` เวอร์ชันล่าสุด:
+     ```bash
+     sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+     sudo chmod a+rx /usr/local/bin/yt-dlp
+     ```
+2. ติดตั้ง dependencies ของ Node.js:
    ```bash
    cd node_service
-   ```
-2. รันสคริปต์ติดตั้งด้วยสิทธิ์ root:
-   ```bash
-   chmod +x install_linux.sh
-   sudo ./install_linux.sh
+   npm install
    ```
 
 ---
