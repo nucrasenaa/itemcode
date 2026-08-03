@@ -150,6 +150,34 @@ class HofRedeemer:
         except Exception as e:
             print(f"[-] ไม่สามารถบันทึก config ได้: {e}")
 
+    def log_token_expiration(self, token: str):
+        if not token:
+            return
+        try:
+            parts = token.split('.')
+            if len(parts) == 3:
+                # Add padding if needed for base64 decoding
+                payload_b64 = parts[1]
+                padding = len(payload_b64) % 4
+                if padding:
+                    payload_b64 += '=' * (4 - padding)
+                payload_str = base64.b64decode(payload_b64).decode('utf-8')
+                payload = json.loads(payload_str)
+                exp = payload.get("exp")
+                if isinstance(exp, (int, float)):
+                    exp_time = float(exp)
+                    remaining_sec = exp_time - time.time()
+                    remaining_mins = round(remaining_sec / 60)
+                    from datetime import datetime
+                    exp_dt = datetime.fromtimestamp(exp_time).strftime('%d/%m/%Y, %H:%M:%S')
+                    if remaining_mins > 0:
+                        print(f"[*] Token จะหมดอายุในอีก {remaining_mins} นาที ({exp_dt})")
+                    else:
+                        print(f"[!] Token หมดอายุแล้วเมื่อ {abs(remaining_mins)} นาทีที่แล้ว ({exp_dt})")
+                    return
+        except Exception as e:
+            print(f"[-] ไม่สามารถตรวจสอบวันหมดอายุของ Token ได้: {e}")
+
     def load_session(self):
         """Load access token, game_id, and credentials from local config file"""
         if os.path.exists(SESSION_FILE):
@@ -162,6 +190,7 @@ class HofRedeemer:
                     self.password = config.get("password") or ""
                 if self.access_token:
                     print(f"[+] โหลด Access Token จาก Session เก่าสำเร็จ: {self.access_token[:15]}...")
+                    self.log_token_expiration(self.access_token)
             except Exception as e:
                 print(f"[-] ไม่สามารถโหลด session config ได้: {e}")
 
@@ -169,6 +198,7 @@ class HofRedeemer:
         """Directly set the bearer token"""
         token = token.replace("Bearer ", "").strip()
         self.access_token = token
+        self.log_token_expiration(token)
         self.save_session()
 
     def login_with_credentials(self, username: str, password: str) -> bool:
@@ -287,6 +317,7 @@ class HofRedeemer:
                 self.access_token = res_data.get("access_token")
                 if self.access_token:
                     print("[+] ได้รับ Access Token เรียบร้อย!")
+                    self.log_token_expiration(self.access_token)
                     self.save_session()
                     return True
                 else:

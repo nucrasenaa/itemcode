@@ -34,6 +34,29 @@ function log(msg) {
     console.log(`[${timestamp}] ${msg}`);
 }
 
+function logTokenExpiration(token) {
+    if (!token) return;
+    try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+            if (payload && typeof payload.exp === 'number') {
+                const expMs = payload.exp * 1000;
+                const remainingMs = expMs - Date.now();
+                const remainingMins = Math.round(remainingMs / (1000 * 60));
+                if (remainingMins > 0) {
+                    log(`[*] Token จะหมดอายุในอีก ${remainingMins} นาที (${new Date(expMs).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })})`);
+                } else {
+                    log(`[!] Token หมดอายุแล้วเมื่อ ${Math.abs(remainingMins)} นาทีที่แล้ว (${new Date(expMs).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })})`);
+                }
+                return;
+            }
+        }
+    } catch (e) {
+        log(`[-] ไม่สามารถตรวจสอบวันหมดอายุของ Token ได้: ${e.message}`);
+    }
+}
+
 // Cookie Jar implementation to handle OAuth Session context manually
 class CookieJar {
     constructor() {
@@ -187,9 +210,8 @@ async function notifyTokenExpired() {
     if (hasNotifiedTokenExpired) return;
     hasNotifiedTokenExpired = true;
     const msg = `⚠️ *[TalesRunner Watcher Alert]*\n\n🔒 *Access Token หมดอายุแล้ว!*\n\nระบบไม่สามารถทำการเคลมโค้ดไอเทมอัตโนมัติได้ กรุณาล็อกอินผ่านเบราว์เซอร์แล้วนำ Bearer Token ใหม่มาตั้งค่าด้วยคำสั่ง:\n\`node index.js --set-token <YOUR_BEARER_TOKEN>\``;
-    log(`[!] ส่งการแจ้งเตือน Telegram / Discord: Token หมดอายุแล้ว`);
+    log(`[!] ส่งการแจ้งเตือน Telegram: Token หมดอายุแล้ว`);
     await sendTelegram(msg);
-    await sendDiscord(msg);
 }
 
 async function verifyToken(token) {
@@ -426,6 +448,7 @@ async function exchangeCodeWithVerifier(authCode, codeVerifier) {
             accessToken = resData.access_token;
             if (accessToken) {
                 log(`[+] Node: ได้รับ Access Token เรียบร้อย! (${accessToken.substring(0, 15)}...)`);
+                logTokenExpiration(accessToken);
                 saveSession(accessToken, currentLoggedInUser);
                 return true;
             } else {
@@ -1451,6 +1474,7 @@ async function main() {
         log(`[*] กำลังบันทึก Access Token ใหม่จากคำสั่ง...`);
         saveSession(rawToken, config.username || "ManualUser");
         accessToken = rawToken;
+        logTokenExpiration(rawToken);
     }
 
     // 1. Try loading existing session token
@@ -1462,6 +1486,7 @@ async function main() {
         const isValid = await verifyToken(savedToken);
         if (isValid) {
             log(`[+] Session Token ใช้งานได้ปกติ! ข้ามการล็อกอินผ่าน Cloudflare`);
+            logTokenExpiration(savedToken);
             primaryLoginSuccess = true;
         } else {
             log(`[-] Session Token เดิมหมดอายุแล้ว`);
