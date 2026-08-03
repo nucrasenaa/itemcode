@@ -72,12 +72,17 @@ cp service_config.json.example service_config.json
 | `username` | บัญชี HOF หลัก |
 | `password` | รหัสผ่านบัญชี HOF หลัก |
 | `game_id` | รหัสอ้างอิงเกมของ Talesrunner |
+| `proxy_url` | URL ของ Proxy Server เช่น `http://127.0.0.1:8118` (รองรับ HTTP/HTTPS Proxy) |
 
 ---
 
 ## 🎯 วิธีใช้งาน
 
 ```bash
+# รันระบบปกติ (ไม่ผ่าน Proxy)
+node index.js
+
+# รันระบบผ่าน Proxy (เช่น Tor/Privoxy)
 node index.js
 ```
 * โปรแกรมจะทำงานในรูปแบบ Background / Console-only

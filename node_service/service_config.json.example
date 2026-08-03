@@ -19,5 +19,6 @@
   "ocr_helper_path_linux": "tesseract",
   "username": "YOUR_HOF_USERNAME",
   "password": "YOUR_HOF_PASSWORD",
-  "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2"
+  "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
+  "proxy_url": ""
 }

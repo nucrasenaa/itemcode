@@ -165,10 +165,17 @@ function loadConfig() {
             ocr_helper_path: "./ocr_helper",
             username: "",
             password: "",
-            game_id: "ece25107-ec4f-4c83-9f2b-38afd0e77cc2"
+            game_id: "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
+            proxy_url: ""
         };
     }
     adjustPathsForOS();
+
+    // Set proxy environment variables if configured
+    if (config.proxy_url) {
+        process.env.HTTP_PROXY = config.proxy_url;
+        process.env.HTTPS_PROXY = config.proxy_url;
+    }
 }
 
 const SESSION_FILE = path.join(__dirname, '.session_config.json');
@@ -1465,6 +1472,10 @@ async function main() {
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     const hasDiscord = Array.isArray(config.discord_webhook_url) ? config.discord_webhook_url.length > 0 : !!config.discord_webhook_url;
     log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    if (config.proxy_url) {
+        log(`  Proxy Server: ${config.proxy_url}`);
+        log(`  [⚠️] บอทจะเชื่อมต่อผ่าน Proxy Server อัตโนมัติ`);
+    }
     log(`==================================================\n`);
 
     // Check CLI argument for manual token setting
