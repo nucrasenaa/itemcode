@@ -20,5 +20,7 @@
   "username": "YOUR_HOF_USERNAME",
   "password": "YOUR_HOF_PASSWORD",
   "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
-  "proxy_url": ""
+  "proxy_url": "",
+  "ytdl_cookies_from_browser": "",
+  "ytdl_cookies_file": ""
 }

@@ -130,6 +130,10 @@ function adjustPathsForOS() {
             }
         }
 
+    if (config.ytdl_cookies_file) {
+        config.ytdl_cookies_file = expandPathVars(config.ytdl_cookies_file);
+    }
+
     log(`[*]   yt-dlp     → ${config.ytdl_path}`);
     log(`[*]   ffmpeg     → ${config.ffmpeg_path}`);
     log(`[*]   ocr_helper → ${config.ocr_helper_path}`);
@@ -145,6 +149,8 @@ function loadConfig() {
             config = JSON.parse(data);
             if (!config.username) config.username = "";
             if (!config.password) config.password = "";
+            if (!config.ytdl_cookies_from_browser) config.ytdl_cookies_from_browser = "";
+            if (!config.ytdl_cookies_file) config.ytdl_cookies_file = "";
         } else {
             throw new Error('Config file not found');
         }
@@ -166,7 +172,9 @@ function loadConfig() {
             username: "",
             password: "",
             game_id: "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
-            proxy_url: ""
+            proxy_url: "",
+            ytdl_cookies_from_browser: "",
+            ytdl_cookies_file: ""
         };
     }
     adjustPathsForOS();
@@ -872,6 +880,17 @@ function isYoutubeChannel(url) {
     return hasChannelMarker && !hasVideoMarker;
 }
 
+// Helper to construct yt-dlp arguments with cookie options
+function getYtdlArgs(args = []) {
+    const finalArgs = [...args];
+    if (config.ytdl_cookies_from_browser) {
+        finalArgs.push('--cookies-from-browser', config.ytdl_cookies_from_browser);
+    } else if (config.ytdl_cookies_file) {
+        finalArgs.push('--cookies', config.ytdl_cookies_file);
+    }
+    return finalArgs;
+}
+
 // Get Channel Live stream Video URL
 async function checkChannelLive(channelUrl) {
     const ytdl = config.ytdl_path || 'yt-dlp';
@@ -884,13 +903,13 @@ async function checkChannelLive(channelUrl) {
     }
 
     try {
-        const { stdout } = await execFileAsync(ytdl, ['--get-id', liveUrl], { timeout: 15000 });
+        const { stdout } = await execFileAsync(ytdl, getYtdlArgs(['--get-id', liveUrl]), { timeout: 15000 });
         const videoId = stdout.trim();
         if (videoId && !videoId.includes('\n')) {
             return `https://www.youtube.com/watch?v=${videoId}`;
         }
     } catch (e) {
-        // Exits with 1 when channel is offline
+        log(`[-] checkChannelLive error: ${e.message}`);
     }
     return null;
 }
@@ -899,7 +918,7 @@ async function checkChannelLive(channelUrl) {
 async function isStreamLive(videoUrl) {
     const ytdl = config.ytdl_path || 'yt-dlp';
     try {
-        const { stdout } = await execFileAsync(ytdl, ['--print', 'is_live', videoUrl], { timeout: 15000 });
+        const { stdout } = await execFileAsync(ytdl, getYtdlArgs(['--print', 'is_live', videoUrl]), { timeout: 15000 });
         const result = stdout.trim().toLowerCase();
         return result === 'true';
     } catch (e) {
@@ -912,11 +931,11 @@ async function isStreamLive(videoUrl) {
 async function resolveDirectUrl(videoUrl) {
     const ytdl = config.ytdl_path || 'yt-dlp';
     try {
-        const { stdout } = await execFileAsync(ytdl, [
+        const { stdout } = await execFileAsync(ytdl, getYtdlArgs([
             '-g',
             '-f', '134/bestvideo[height<=360]/best',
             videoUrl
-        ], { timeout: 15000 });
+        ]), { timeout: 15000 });
         const directUrl = stdout.trim();
         if (directUrl) {
             return directUrl;
