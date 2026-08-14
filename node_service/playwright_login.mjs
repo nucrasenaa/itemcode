@@ -33,6 +33,7 @@ const PASSWORD_SELECTOR =
   'input[name="password"], input[type="password"]';
 
 const SUBMIT_SELECTOR = process.env.HOF_SUBMIT_SELECTOR ?? null;
+const SHOW_CHROMIUM = process.argv.includes("--show-chromium") || process.env.HOF_HEADLESS !== "true";
 
 async function loadCredentials() {
   let config;
@@ -100,13 +101,14 @@ async function waitForLoginPage(page) {
 const { username, password } = await loadCredentials();
 
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
-  headless: false,
+  headless: !SHOW_CHROMIUM,
   viewport: { width: 1440, height: 900 },
 });
 
 const page = context.pages()[0] ?? (await context.newPage());
 
 try {
+  console.log(`Chromium mode: ${SHOW_CHROMIUM ? "visible" : "headless"}`);
   await page.goto(LOGIN_URL, {
     waitUntil: "domcontentloaded",
     timeout: 60_000,

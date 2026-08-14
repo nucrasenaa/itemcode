@@ -115,4 +115,12 @@ cd node_service
 npm run test:login
 ```
 
+หรือเรียกโหมดเปิด Chromium ให้เห็นโดยตรง:
+
+```bash
+cd node_service
+npm run test:login:show
+# เทียบเท่า: node playwright_login.mjs --show-chromium
+```
+
 ไฟล์ profile และ auth state เป็นข้อมูลลับและถูกกำหนดไว้ใน `.gitignore` แล้ว
