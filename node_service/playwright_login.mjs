@@ -34,6 +34,9 @@ const PASSWORD_SELECTOR =
 
 const SUBMIT_SELECTOR = process.env.HOF_SUBMIT_SELECTOR ?? null;
 const SHOW_CHROMIUM = process.argv.includes("--show-chromium") || process.env.HOF_HEADLESS !== "true";
+const TURNSTILE_INPUT_SELECTOR = 'input[name="cf-turnstile-response"]';
+const TURNSTILE_WRAPPER_SELECTOR =
+  'div:has(> div > div > input[name="cf-turnstile-response"])';
 
 async function loadCredentials() {
   let config;
@@ -63,6 +66,52 @@ async function waitForEnter(message) {
   });
   await rl.question(`${message}\n`);
   rl.close();
+}
+
+async function waitForTurnstileToken(page, timeout = 120_000) {
+  const input = page.locator(TURNSTILE_INPUT_SELECTOR).first();
+  const deadline = Date.now() + timeout;
+
+  while (Date.now() < deadline) {
+    const token = await input.inputValue().catch(() => "");
+    if (token) return true;
+    await page.waitForTimeout(500);
+  }
+
+  return false;
+}
+
+async function clickTurnstileIfVisible(page) {
+  const deadline = Date.now() + 120_000;
+
+  while (Date.now() < deadline) {
+    if (await page.locator(TURNSTILE_INPUT_SELECTOR).first().inputValue().catch(() => "")) {
+      return true;
+    }
+
+    const wrapper = page.locator(TURNSTILE_WRAPPER_SELECTOR).first();
+    if (await wrapper.isVisible().catch(() => false)) {
+      const box = await wrapper.boundingBox().catch(() => null);
+      if (box && box.width > 250 && box.height > 40) {
+        await page.waitForTimeout(800);
+        await page.mouse.click(box.x + 22, box.y + Math.min(32, box.height / 2));
+      }
+    } else {
+      const iframe = page.locator('iframe[src*="challenges.cloudflare.com"]').first();
+      if (await iframe.isVisible().catch(() => false)) {
+        const box = await iframe.boundingBox().catch(() => null);
+        if (box && box.width > 250 && box.height > 40) {
+          await page.waitForTimeout(800);
+          await page.mouse.click(box.x + 42, box.y + Math.min(45, box.height / 2));
+        }
+      }
+    }
+
+    if (await waitForTurnstileToken(page, 2_000)) return true;
+    await page.waitForTimeout(500);
+  }
+
+  return false;
 }
 
 async function clickLogin(page) {

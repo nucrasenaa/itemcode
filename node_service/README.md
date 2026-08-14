@@ -120,7 +120,13 @@ npm run test:login
 ```bash
 cd node_service
 npm run test:login:show
-# เทียบเท่า: node playwright_login.mjs --show-chromium
+# เทียบเท่า: node browser_login_test.mjs --show-chromium
+```
+
+คำสั่งนี้ใช้ CloakBrowser และกด Turnstile อัตโนมัติ หากต้องการทดสอบบัญชีสำรอง:
+
+```bash
+HOF_ACCOUNT=secondary npm run test:login:show
 ```
 
 ไฟล์ profile และ auth state เป็นข้อมูลลับและถูกกำหนดไว้ใน `.gitignore` แล้ว

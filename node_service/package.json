@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"No automated tests configured\"",
     "test:login": "node playwright_login.mjs",
-    "test:login:show": "node playwright_login.mjs --show-chromium"
+    "test:login:show": "node browser_login_test.mjs --show-chromium"
   },
   "keywords": [],
   "author": "",
