@@ -18,6 +18,10 @@
 * **ภาษาหลัก:** Python (Flask)
 * **รูปแบบการใช้งาน:** ควบคุมผ่านหน้าเว็บ Dashboard (`http://localhost:5000`)
 * **จุดเด่น:** แสดงสตรีมสด แสดงบันทึกเหตุการณ์ (Logs) ประวัติโค้ดที่เคยพบ และของรางวัลบน Dashboard แบบ Real-time พร้อมสั่งเปิด/ปิดบอทจากหน้าเว็บได้สะดวก
+
+### 3. [gen_service](file:///Users/crase/OS/itemcode/gen_service/README.md)
+* **ภาษาหลัก:** Node.js
+* **รูปแบบการใช้งาน:** สุ่ม code ตาม pattern, ตรวจด้วย `check-serial`, บันทึก code ที่ใช้ได้ และกันการสุ่มซ้ำด้วย `log.json`
 * **ลิงก์หน้าคู่มือและตัวติดตั้ง:** ดูรายละเอียดได้ที่ [web_app/README.md](file:///Users/crase/OS/itemcode/web_app/README.md)
 
 ---
@@ -26,3 +30,19 @@
 * **macOS:** รองรับ macOS 12+ (ใช้ Apple Vision Framework สำหรับ OCR)
 * **Windows:** รองรับ Windows 10/11 (ใช้ WinRT OCR)
 * จำเป็นต้องมี `yt-dlp` และ `FFmpeg` ติดตั้งในเครื่อง (มีมาให้ในตัวช่วยติดตั้งภายในแต่ละโฟลเดอร์)
+
+## 🎲 เครื่องมือสุ่มตามรูปแบบโค้ด
+
+`pattern_generator.py` สร้าง candidate แบบออฟไลน์จากรูปแบบใน `codes_only.txt`
+โดยไม่เชื่อมต่อ API และไม่ตรวจสอบหรือแลกโค้ด:
+
+```bash
+# ดูจำนวน template ที่พบ
+python3 pattern_generator.py --show-patterns
+
+# สุ่มรวมทุก pattern
+python3 pattern_generator.py --count 100 --seed 20260814
+
+# เลือก pattern: letters, one, two, three หรือ multi
+python3 pattern_generator.py --pattern two --count 1000 --output candidates.txt
+```

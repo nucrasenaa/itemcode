@@ -15,6 +15,7 @@ const MEMBER_DOMAIN = "member.thehof.gg";
 const API_BASE_URL = "https://core-api.thehof.gg";
 const CLIENT_ID = "bcb3b4ce-67ad-11f0-9fe2-0242ac120002";
 const REDIRECT_URI = "https://member.thehof.gg/oauth/callback";
+const ITEMCODE_URL = `https://${MEMBER_DOMAIN}/talesrunner/itemcode`;
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15';
 
 // State variables
@@ -149,6 +150,14 @@ function loadConfig() {
             config = JSON.parse(data);
             if (!config.username) config.username = "";
             if (!config.password) config.password = "";
+            if (!config.username2) config.username2 = "";
+            if (!config.password2) config.password2 = "";
+            if (config.browser_redeem_enabled === undefined) {
+                config.browser_redeem_enabled = !!(config.username2 && config.password2);
+            }
+            if (config.browser_redeem_headless === undefined) {
+                config.browser_redeem_headless = true;
+            }
             if (!config.ytdl_cookies_from_browser) config.ytdl_cookies_from_browser = "";
             if (!config.ytdl_cookies_file) config.ytdl_cookies_file = "";
         } else {
@@ -171,6 +180,10 @@ function loadConfig() {
             ocr_helper_path: "./ocr_helper",
             username: "",
             password: "",
+            username2: "",
+            password2: "",
+            browser_redeem_enabled: false,
+            browser_redeem_headless: true,
             game_id: "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
             proxy_url: "",
             ytdl_cookies_from_browser: "",
@@ -729,6 +742,248 @@ async function redeemCodeInner(serial, username = null, password = null) {
     }
 }
 
+// Browser redemption flow for the secondary account.
+// This keeps the CAPTCHA step in a real visible browser and submits through the
+// item-code page instead of sending an empty captcha_token to the API.
+async function redeemCodeWithBrowser(serial, username = null, password = null) {
+    const targetUsername = username || config.username2 || "";
+    const targetPassword = password || config.password2 || "";
+    const normalizedSerial = String(serial || "").trim().toUpperCase();
+
+    if (!targetUsername || !targetPassword) {
+        return { completed: false, success: false, message: "ไม่ได้กำหนด username2/password2" };
+    }
+    if (!normalizedSerial) {
+        return { completed: false, success: false, message: "ไม่ได้กำหนด itemcode" };
+    }
+
+    let browser;
+    try {
+        const { launch } = await import('cloakbrowser/puppeteer');
+        const headless = process.env.BROWSER_REDEEM_HEADLESS === 'true' || config.browser_redeem_headless === true;
+        log(`[BROWSER] โหมดการแสดงผล: ${headless ? 'เบื้องหลัง (headless)' : 'มีหน้าต่าง (headed)'}`);
+        browser = await launch({ headless, humanize: true, args: [] });
+        const pages = await browser.pages();
+        const page = pages[0] || await browser.newPage();
+        page.setDefaultNavigationTimeout(120000);
+        const dialogMessages = [];
+        const responseSignals = [];
+        page.on('dialog', async dialog => {
+            dialogMessages.push(dialog.message());
+            await dialog.dismiss().catch(() => {});
+        });
+        page.on('response', async response => {
+            const method = response.request().method();
+            if (method === 'GET' || method === 'OPTIONS') return;
+            const text = await response.text().catch(() => '');
+            const lower = text.toLowerCase();
+            if (text.includes('ปิดปรับปรุงระบบ') ||
+                text.includes('กรุณาลองใหม่อีกครั้งในภายหลัง') ||
+                lower.includes('temporarily unavailable') ||
+                lower.includes('try again later')) {
+                responseSignals.push(text.slice(0, 1000));
+            }
+        });
+
+        const sleepMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function clickTurnstileIfVisible() {
+            for (let attempt = 0; attempt < 15; attempt++) {
+                const wrapper = await page.$('div:has(> div > div > input[name="cf-turnstile-response"])');
+                if (wrapper) {
+                    const rect = await wrapper.boundingBox();
+                    if (rect && rect.width > 250 && rect.height > 40) {
+                        await sleepMs(1000 + Math.random() * 1000);
+                        await page.mouse.click(
+                            rect.x + 20 + Math.random() * 6,
+                            rect.y + 30 + Math.random() * 6
+                        );
+                        return true;
+                    }
+                }
+                await sleepMs(1000);
+            }
+            return false;
+        }
+
+        async function waitForTurnstileToken(timeoutMs = 30000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                const token = await page.$eval(
+                    'input[name="cf-turnstile-response"]',
+                    el => el.value || ''
+                ).catch(() => '');
+                if (token) return true;
+                await sleepMs(500);
+            }
+            return false;
+        }
+
+        async function clickButtonByText(text) {
+            const buttons = await page.$$('button');
+            for (const button of buttons) {
+                const label = await page.evaluate(el => (el.innerText || '').trim(), button).catch(() => '');
+                if (label.includes(text)) {
+                    await button.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        async function dismissCookieBanner() {
+            return (await clickButtonByText('ยอมรับทั้งหมด')) ||
+                (await clickButtonByText('ปฏิเสธ'));
+        }
+
+        // 1. Login through the visible browser and pass the WAF interstitial.
+        await page.goto(`${PASSPORT_BASE_URL}/hall-of-fame-web/login`, {
+            waitUntil: 'domcontentloaded'
+        });
+        if ((await page.content()).includes('challenge-platform')) {
+            log(`[BROWSER] พบ Cloudflare challenge สำหรับบัญชีสำรอง กำลังดำเนินการ...`);
+            await clickTurnstileIfVisible();
+            for (let i = 0; i < 30 && (await page.content()).includes('challenge-platform'); i++) {
+                await sleepMs(1000);
+            }
+        }
+
+        await page.goto(`${PASSPORT_BASE_URL}/hall-of-fame-web/login`, {
+            waitUntil: 'domcontentloaded'
+        });
+        const usernameInput = await page.waitForSelector(
+            'input[name="username"], input[type="email"]',
+            { visible: true, timeout: 60000 }
+        );
+        const passwordInput = await page.waitForSelector(
+            'input[name="password"], input[type="password"]',
+            { visible: true, timeout: 60000 }
+        );
+        await usernameInput.type(targetUsername);
+        await passwordInput.type(targetPassword);
+
+        // The login form can have its own Turnstile widget even after the
+        // Cloudflare interstitial has been cleared.
+        let loginCaptchaSolved = await waitForTurnstileToken(5000);
+        if (!loginCaptchaSolved) {
+            log(`[BROWSER] หน้า login ต้องยืนยัน Turnstile กำลังดำเนินการ...`);
+            await clickTurnstileIfVisible();
+            loginCaptchaSolved = await waitForTurnstileToken(30000);
+        }
+        if (!loginCaptchaSolved) {
+            return {
+                completed: true,
+                success: false,
+                stage: 'captcha',
+                message: 'ไม่พบ captcha token ของหน้า login'
+            };
+        }
+
+        const loginSubmit = await page.$('button[type="submit"], input[type="submit"]');
+        if (!loginSubmit) throw new Error('ไม่พบปุ่ม submit ของหน้า login');
+        await Promise.allSettled([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 120000 }),
+            loginSubmit.click()
+        ]);
+        await sleepMs(2000);
+
+        if (page.url().includes('/login')) {
+            const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+            return {
+                completed: true,
+                success: false,
+                stage: 'login',
+                message: bodyText.slice(0, 500) || 'ล็อกอินบัญชีสำรองไม่สำเร็จ'
+            };
+        }
+
+        // 2. Open item-code page and wait for the embedded Turnstile widget.
+        await page.goto(ITEMCODE_URL, { waitUntil: 'domcontentloaded' });
+        await sleepMs(5000);
+        await dismissCookieBanner();
+        const codeInput = await page.waitForSelector('input[name="code"]', {
+            visible: true,
+            timeout: 60000
+        });
+        await codeInput.click();
+        await codeInput.type(normalizedSerial);
+
+        let captchaSolved = await waitForTurnstileToken(5000);
+        if (!captchaSolved) {
+            await clickTurnstileIfVisible();
+            captchaSolved = await waitForTurnstileToken(30000);
+        }
+        if (!captchaSolved) {
+            return {
+                completed: true,
+                success: false,
+                stage: 'captcha',
+                message: 'ไม่พบ captcha token ของหน้า itemcode'
+            };
+        }
+
+        // 3. Submit the item code through the page UI.
+        const submit = await page.$('button[type="submit"]');
+        if (!submit) throw new Error('ไม่พบปุ่มใช้ไอเทมโค้ด');
+        await Promise.allSettled([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
+            submit.click()
+        ]);
+        await sleepMs(3000);
+
+        const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+        const visibleDialogText = dialogMessages.join('\n');
+        const resultText = `${bodyText}\n${visibleDialogText}\n${responseSignals.join('\n')}`;
+        const lowerText = resultText.toLowerCase();
+        const maintenance = resultText.includes('ปิดปรับปรุงระบบ') ||
+            resultText.includes('กรุณาลองใหม่อีกครั้งในภายหลัง') ||
+            lowerText.includes('temporarily unavailable') ||
+            lowerText.includes('try again later');
+
+        return {
+            completed: true,
+            success: !maintenance,
+            stage: 'submit',
+            maintenance,
+            url: page.url(),
+            title: await page.title(),
+            message: resultText.slice(0, 1000)
+        };
+    } catch (e) {
+        return {
+            completed: false,
+            success: false,
+            stage: 'exception',
+            message: e.message
+        };
+    } finally {
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (e) { }
+        }
+    }
+}
+
+async function runBrowserRedeemAfterNotification(serial) {
+    if (!config.browser_redeem_enabled) return null;
+    if (!config.username2 || !config.password2) {
+        log(`[BROWSER] ข้ามการเคลมผ่านหน้าเว็บ: ไม่มี username2/password2`);
+        return null;
+    }
+
+    log(`[BROWSER] แจ้งเตือนเสร็จแล้ว กำลังเปิดหน้า itemcode ด้วยบัญชีสำรอง...`);
+    const result = await redeemCodeWithBrowser(serial, config.username2, config.password2);
+    if (result.maintenance) {
+        log(`[BROWSER] หน้าเว็บตอบกลับว่าอยู่ระหว่างปิดปรับปรุงระบบ`);
+    } else if (result.success) {
+        log(`[BROWSER] ส่ง itemcode ผ่านหน้าเว็บสำเร็จ: ${serial}`);
+    } else {
+        log(`[BROWSER] flow ไม่สำเร็จ (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
+    }
+    return result;
+}
+
 // Send Telegram Notification
 async function sendTelegram(message, redeemResult = null) {
     const isEnabled = config.telegram_enabled !== undefined ? !!config.telegram_enabled : (!!config.telegram_token && !!config.telegram_chat_id);
@@ -1143,6 +1398,22 @@ async function processScan(directUrl) {
                         }
                         notified = true;
 
+                        const browserResult = await runBrowserRedeemAfterNotification(varCode);
+                        if (browserResult) {
+                            for (const v of variations) {
+                                history.add(v);
+                            }
+                            history.add(code);
+                            saveHistory();
+
+                            if (sentTele || sentDisc) {
+                                await sleepOcr(10);
+                            }
+
+                            success = true;
+                            break;
+                        }
+
                         let waitSeconds = 10;
                         if (msgStr.includes("please wait")) {
                             waitSeconds = parseWaitTime(msg);
@@ -1267,6 +1538,8 @@ async function processScan(directUrl) {
                             }
                             notified = true;
                         }
+
+                        await runBrowserRedeemAfterNotification(varCode);
 
 
                         // Add all variations to history to prevent duplicate notifications for this code family
@@ -1491,11 +1764,37 @@ async function main() {
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     const hasDiscord = Array.isArray(config.discord_webhook_url) ? config.discord_webhook_url.length > 0 : !!config.discord_webhook_url;
     log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    log(`  Browser itemcode ด้วยบัญชีสำรอง: ${config.browser_redeem_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     if (config.proxy_url) {
         log(`  Proxy Server: ${config.proxy_url}`);
         log(`  [⚠️] บอทจะเชื่อมต่อผ่าน Proxy Server อัตโนมัติ`);
     }
     log(`==================================================\n`);
+
+    const browserRedeemArgIdx = process.argv.findIndex(arg => arg === '--test-browser-redeem');
+    if (browserRedeemArgIdx !== -1 && process.argv[browserRedeemArgIdx + 1]) {
+        const testCode = process.argv[browserRedeemArgIdx + 1].trim().toUpperCase();
+        log(`\n==================================================`);
+        log(`[🧪] โหมดทดสอบ browser itemcode: ${testCode}`);
+        log(`==================================================`);
+
+        if (!config.username2 || !config.password2) {
+            log(`[RESULT] ไม่ได้กำหนด username2/password2 ใน service_config.json`);
+            process.exit(1);
+        }
+
+        const result = await redeemCodeWithBrowser(testCode, config.username2, config.password2);
+        log(`[RESULT] ${JSON.stringify({
+            completed: result.completed,
+            success: result.success,
+            stage: result.stage,
+            maintenance: result.maintenance,
+            url: result.url,
+            title: result.title,
+            message: result.message
+        }, null, 2)}`);
+        process.exit(result.completed ? 0 : 1);
+    }
 
     // Check CLI argument for manual token setting
     const tokenArgIdx = process.argv.findIndex(arg => arg === '--set-token' || arg === '--token');

@@ -8,6 +8,11 @@ web_config.json
 node_service.log
 notified_codes.log
 
+# Playwright browser profile and authenticated state
+node_service/.browser-profile/
+node_service/.auth/
+node_service/node_modules/
+
 # Databases & local history
 ocr_history.json
 

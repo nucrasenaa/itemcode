@@ -71,6 +71,10 @@ cp service_config.json.example service_config.json
 | `scan_interval` | ความถี่ในการจับภาพสแกน (วินาที, default: `10`) |
 | `username` | บัญชี HOF หลัก |
 | `password` | รหัสผ่านบัญชี HOF หลัก |
+| `username2` | บัญชี HOF สำรองสำหรับเปิดหน้า itemcode |
+| `password2` | รหัสผ่านบัญชี HOF สำรอง |
+| `browser_redeem_enabled` | `true` เพื่อให้เปิด browser บัญชีสำรองหลังส่งแจ้งเตือน แล้วกรอกและใช้ itemcode ผ่านหน้าเว็บ |
+| `browser_redeem_headless` | `true` เพื่อเปิด browser แบบเบื้องหลัง; ค่าเริ่มต้นเป็น `true` |
 | `game_id` | รหัสอ้างอิงเกมของ Talesrunner |
 | `proxy_url` | URL ของ Proxy Server เช่น `http://127.0.0.1:8118` (รองรับ HTTP/HTTPS Proxy) |
 
@@ -87,3 +91,28 @@ node index.js
 ```
 * โปรแกรมจะทำงานในรูปแบบ Background / Console-only
 * บันทึกความเคลื่อนไหวลงในหน้าจอ Terminal และบันทึกล็อกเข้า `node_service.log`
+
+### ทดสอบ flow ใช้ itemcode ผ่าน browser
+
+คำสั่งนี้ใช้บัญชี `username2/password2` เปิดหน้า login แล้วไปที่หน้า
+Tales Runner itemcode จากนั้นรอ Turnstile และกดปุ่ม `ใช้ไอเทมโค้ด`:
+
+```bash
+node index.js --test-browser-redeem KEXEDP8BSF8P
+```
+
+เมื่อระบบแจ้งเตือน Telegram/Discord สำเร็จแล้ว flow เดียวกันจะถูกเรียกอัตโนมัติ
+ถ้า `browser_redeem_enabled` เป็น `true`.
+
+### ทดสอบล็อกอินด้วย Playwright
+
+สคริปต์จะอ่าน `username` และ `password` จาก `service_config.json` โดยตรง เปิด
+browser แบบมีหน้าต่างให้ทำ Cloudflare challenge ด้วยตนเองเมื่อพบ แล้วบันทึก
+authenticated state ไว้ที่ `node_service/.auth/thehof.json`:
+
+```bash
+cd node_service
+npm run test:login
+```
+
+ไฟล์ profile และ auth state เป็นข้อมูลลับและถูกกำหนดไว้ใน `.gitignore` แล้ว

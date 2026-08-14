@@ -1,0 +1,19 @@
+{
+  "name": "node_service",
+  "version": "1.0.0",
+  "description": "ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รวดเร็วและกินทรัพยากรเครื่องน้อยมาก   รองรับทั้ง **macOS**, **Windows** และ **Ubuntu/Linux VPS** พร้อมแจ้งเตือนผ่าน **Telegram** และ **Discord**",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No automated tests configured\"",
+    "test:login": "node playwright_login.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cloakbrowser": "^0.3.30",
+    "playwright": "^1.62.1",
+    "puppeteer-core": "^25.0.4"
+  }
+}
