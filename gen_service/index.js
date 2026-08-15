@@ -310,6 +310,18 @@ function extractMessage(payload) {
     return candidates.find((value) => typeof value === "string" && value.trim()) || "";
 }
 
+function isInvalidItemCodeMessage(message) {
+    const normalized = String(message || "").toLowerCase().replace(/\s+/g, " ");
+    return normalized.includes("invalid itemcode") ||
+        normalized.includes("invalid item code") ||
+        normalized.includes("itemcode is invalid") ||
+        normalized.includes("item code is invalid") ||
+        normalized.includes("ไอเทมโค้ดไม่ถูกต้อง") ||
+        normalized.includes("ไอเท็มโค้ดไม่ถูกต้อง") ||
+        normalized.includes("itemcode ไม่ถูกต้อง") ||
+        normalized.includes("item code ไม่ถูกต้อง");
+}
+
 function extractDetail(payload) {
     const checkData = payload && payload.checkData ? payload.checkData : payload;
     const data = checkData && checkData.data !== undefined ? checkData.data : checkData;
@@ -333,13 +345,13 @@ function evaluateNodeCheckResponse(statusCode, payload) {
     // node_service uses checkSuccess (HTTP 200/201 from check-serial) as the
     // primary positive signal. Error text is kept separately for filtering
     // invalid-itemcode and handling wait/captcha responses.
-    const checkSuccess = statusCode === 200 || statusCode === 201;
+    const checkSuccess = (statusCode === 200 || statusCode === 201) && !payload?.nonJson;
     const message = extractMessage(payload);
     const messageLower = message.toLowerCase();
     const isWaitError = messageLower.includes("please wait") ||
         messageLower.includes("captcha token field is required") ||
         messageLower.includes("captcha type is present");
-    const invalidItemCode = messageLower.includes("invalid itemcode");
+    const invalidItemCode = isInvalidItemCodeMessage(messageLower);
     const shouldNotify = checkSuccess || isWaitError;
 
     return {
@@ -360,7 +372,11 @@ async function responseJson(response) {
     try {
         return JSON.parse(text);
     } catch (_) {
-        return { raw: text };
+        const contentType = response.headers.get("content-type") || "ไม่ระบุ content-type";
+        return {
+            nonJson: true,
+            message: `response ไม่ใช่ JSON (HTTP ${response.status}, ${contentType})`
+        };
     }
 }
 

@@ -580,6 +580,52 @@ function generateCodeVariations(code, maxVariations = 64) {
     return uniqueVariations;
 }
 
+async function readApiResponse(response) {
+    const raw = await response.text();
+    if (!raw.trim()) {
+        return { data: {}, raw, isJson: true };
+    }
+
+    try {
+        return { data: JSON.parse(raw), raw, isJson: true };
+    } catch (_) {
+        return { data: {}, raw, isJson: false };
+    }
+}
+
+function extractApiMessage(payload) {
+    const candidates = [
+        payload && payload.message,
+        payload && payload.error,
+        payload && payload.detail,
+        payload && payload.data && payload.data.message,
+        payload && payload.data && payload.data.error,
+        payload && payload.data && payload.data.detail
+    ];
+    return candidates.find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+function isInvalidItemCodeMessage(message) {
+    const normalized = String(message || '').toLowerCase().replace(/\s+/g, ' ');
+    return normalized.includes('invalid itemcode') ||
+        normalized.includes('invalid item code') ||
+        normalized.includes('itemcode is invalid') ||
+        normalized.includes('item code is invalid') ||
+        normalized.includes('ไอเทมโค้ดไม่ถูกต้อง') ||
+        normalized.includes('ไอเท็มโค้ดไม่ถูกต้อง') ||
+        normalized.includes('itemcode ไม่ถูกต้อง') ||
+        normalized.includes('item code ไม่ถูกต้อง');
+}
+
+function formatApiResponseError(action, response, parsed) {
+    const contentType = response.headers.get('content-type') || 'ไม่ระบุ content-type';
+    if (!parsed.isJson) {
+        const htmlResponse = contentType.toLowerCase().includes('text/html');
+        return `${action}: HTTP ${response.status} ได้ response ที่ไม่ใช่ JSON (${contentType})${htmlResponse ? ' — อาจถูก Cloudflare/หน้าเว็บบล็อก' : ''}`;
+    }
+    return extractApiMessage(parsed.data) || `${action}: HTTP ${response.status}`;
+}
+
 // Redeem Itemcode using HOF API
 async function redeemCode(serial, username = null, password = null, rateLimitCallback = null) {
     const maxRateLimitAttempts = 3;
@@ -693,17 +739,41 @@ async function redeemCodeInner(serial, username = null, password = null) {
             }
         }
 
+        const parsedCheck = await readApiResponse(responseCheck);
+        const checkMessage = extractApiMessage(parsedCheck.data);
+
         if (responseCheck.status !== 200 && responseCheck.status !== 201) {
-            const data = responseCheck.status !== 204 ? await responseCheck.json() : {};
             return {
                 success: false,
                 checkSuccess: false,
                 statusCode: responseCheck.status,
-                data: data,
-                message: "Check serial failed"
+                data: parsedCheck.data,
+                message: formatApiResponseError("Check serial failed", responseCheck, parsedCheck)
             };
         }
-        checkData = responseCheck.status !== 204 ? await responseCheck.json() : {};
+
+        if (!parsedCheck.isJson) {
+            return {
+                success: false,
+                checkSuccess: false,
+                statusCode: responseCheck.status,
+                data: parsedCheck.data,
+                message: formatApiResponseError("Check serial failed", responseCheck, parsedCheck)
+            };
+        }
+
+        if (isInvalidItemCodeMessage(checkMessage)) {
+            return {
+                success: false,
+                checkSuccess: false,
+                invalidItemCode: true,
+                statusCode: responseCheck.status,
+                data: parsedCheck.data,
+                message: checkMessage
+            };
+        }
+
+        checkData = parsedCheck.data;
     } catch (e) {
         return { success: false, checkSuccess: false, message: `เกิดข้อผิดพลาดในการตรวจสอบโค้ด: ${e.message}` };
     }
@@ -723,14 +793,18 @@ async function redeemCodeInner(serial, username = null, password = null) {
             headers: headers,
             body: JSON.stringify(payloadRedeem)
         });
-        const data = responseRedeem.status !== 204 ? await responseRedeem.json() : {};
+        const parsedRedeem = await readApiResponse(responseRedeem);
+        const redeemMessage = extractApiMessage(parsedRedeem.data);
 
         return {
-            success: responseRedeem.status === 200 || responseRedeem.status === 201,
+            success: (responseRedeem.status === 200 || responseRedeem.status === 201) && parsedRedeem.isJson,
             checkSuccess: true,
             checkData: checkData,
             statusCode: responseRedeem.status,
-            data: data
+            data: parsedRedeem.data,
+            ...(!parsedRedeem.isJson ? {
+                message: formatApiResponseError("Redeem failed", responseRedeem, parsedRedeem)
+            } : (redeemMessage ? { message: redeemMessage } : {}))
         };
     } catch (e) {
         return { 
@@ -981,6 +1055,35 @@ async function runBrowserRedeemAfterNotification(serial) {
     } else {
         log(`[BROWSER] flow ไม่สำเร็จ (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
     }
+
+    const browserStatus = result.maintenance
+        ? 'ปิดปรับปรุงระบบ'
+        : result.success
+            ? 'เคลมสำเร็จ'
+            : 'เคลมไม่สำเร็จ';
+    const browserDetail = result.maintenance
+        ? 'ปิดปรับปรุงระบบชั่วคราว กรุณาลองใหม่อีกครั้งในภายหลัง'
+        : result.success
+            ? 'ส่ง itemcode ผ่านหน้าเว็บเรียบร้อยแล้ว'
+            : result.stage === 'captcha'
+                ? 'ไม่สามารถยืนยัน Turnstile ได้'
+                : result.stage === 'login'
+                    ? 'ล็อกอินบัญชีสำรองไม่สำเร็จ'
+                    : result.stage === 'exception'
+                        ? 'เกิดข้อผิดพลาดระหว่างทำรายการ'
+                        : 'ไม่สามารถส่ง itemcode ผ่านหน้าเว็บได้';
+    const browserTelegramMessage = [
+        '🖥️ ผลการเคลมผ่าน Browser',
+        `โค้ด: ${serial}`,
+        `สถานะ: ${browserStatus}`,
+        `ขั้นตอน: ${result.stage || 'unknown'}`,
+        `รายละเอียด: ${browserDetail}`
+    ].join('\n');
+    const browserTelegramSent = await sendTelegram(browserTelegramMessage);
+    if (browserTelegramSent) {
+        log(`[BROWSER] ส่งผลการเคลมผ่าน Browser ไป Telegram แล้ว`);
+    }
+
     return result;
 }
 
