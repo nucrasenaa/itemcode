@@ -16,6 +16,8 @@ const API_BASE_URL = "https://core-api.thehof.gg";
 const CLIENT_ID = "bcb3b4ce-67ad-11f0-9fe2-0242ac120002";
 const REDIRECT_URI = "https://member.thehof.gg/oauth/callback";
 const ITEMCODE_URL = `https://${MEMBER_DOMAIN}/talesrunner/itemcode`;
+const BROWSER_REDEEM_MAX_ATTEMPTS = 5;
+const BROWSER_REDEEM_RETRY_DELAY_MS = 5000;
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15';
 
 // State variables
@@ -148,6 +150,11 @@ function loadConfig() {
         if (fs.existsSync(configPath)) {
             const data = fs.readFileSync(configPath, 'utf8');
             config = JSON.parse(data);
+            if (!config.telegram_token) config.telegram_token = "";
+            if (!config.telegram_chat_id) config.telegram_chat_id = "";
+            if (config.telegram_enabled === undefined) {
+                config.telegram_enabled = !!(config.telegram_token && config.telegram_chat_id);
+            }
             if (!config.username) config.username = "";
             if (!config.password) config.password = "";
             if (!config.username2) config.username2 = "";
@@ -167,8 +174,6 @@ function loadConfig() {
         log(`[-] Error loading config: ${e.message}. Using defaults.`);
         config = {
             youtube_url: "https://www.youtube.com/@thehof.talesrunner",
-            discord_webhook_url: "",
-            discord_enabled: false,
             telegram_token: "",
             telegram_chat_id: "",
             telegram_enabled: false,
@@ -1047,13 +1052,30 @@ async function runBrowserRedeemAfterNotification(serial) {
     }
 
     log(`[BROWSER] แจ้งเตือนเสร็จแล้ว กำลังเปิดหน้า itemcode ด้วยบัญชีสำรอง...`);
-    const result = await redeemCodeWithBrowser(serial, config.username2, config.password2);
+    let result = null;
+    for (let attempt = 1; attempt <= BROWSER_REDEEM_MAX_ATTEMPTS; attempt++) {
+        log(`[BROWSER] เริ่มเคลมผ่าน Browser ครั้งที่ ${attempt}/${BROWSER_REDEEM_MAX_ATTEMPTS}`);
+        const attemptResult = await redeemCodeWithBrowser(serial, config.username2, config.password2);
+        result = {
+            ...attemptResult,
+            browser_attempt: attempt,
+            browser_max_attempts: BROWSER_REDEEM_MAX_ATTEMPTS
+        };
+
+        if (result.success) break;
+
+        if (attempt < BROWSER_REDEEM_MAX_ATTEMPTS) {
+            log(`[BROWSER] ครั้งที่ ${attempt} ไม่สำเร็จ จะลองใหม่ใน ${BROWSER_REDEEM_RETRY_DELAY_MS / 1000} วินาที`);
+            await new Promise(resolve => setTimeout(resolve, BROWSER_REDEEM_RETRY_DELAY_MS));
+        }
+    }
+
     if (result.maintenance) {
-        log(`[BROWSER] หน้าเว็บตอบกลับว่าอยู่ระหว่างปิดปรับปรุงระบบ`);
+        log(`[BROWSER] หน้าเว็บตอบกลับว่าอยู่ระหว่างปิดปรับปรุงระบบ (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
     } else if (result.success) {
-        log(`[BROWSER] ส่ง itemcode ผ่านหน้าเว็บสำเร็จ: ${serial}`);
+        log(`[BROWSER] ส่ง itemcode ผ่านหน้าเว็บสำเร็จ: ${serial} (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
     } else {
-        log(`[BROWSER] flow ไม่สำเร็จ (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
+        log(`[BROWSER] flow ไม่สำเร็จหลังลอง ${result.browser_attempt}/${result.browser_max_attempts} ครั้ง (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
     }
 
     const browserStatus = result.maintenance
@@ -1076,6 +1098,7 @@ async function runBrowserRedeemAfterNotification(serial) {
         '🖥️ ผลการเคลมผ่าน Browser',
         `โค้ด: ${serial}`,
         `สถานะ: ${browserStatus}`,
+        `จำนวนครั้ง: ${result.browser_attempt || 1}/${result.browser_max_attempts || BROWSER_REDEEM_MAX_ATTEMPTS}`,
         `ขั้นตอน: ${result.stage || 'unknown'}`,
         `รายละเอียด: ${browserDetail}`
     ].join('\n');
@@ -1085,40 +1108,6 @@ async function runBrowserRedeemAfterNotification(serial) {
     }
 
     return result;
-}
-
-async function runBrowserRedeemWithRetries(serial, maxAttempts = 5) {
-    if (!config.browser_redeem_enabled || !config.username2 || !config.password2) {
-        return null;
-    }
-
-    let lastResult = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        log(`[BROWSER] ลองใช้ itemcode รอบที่ ${attempt}/${maxAttempts}: ${serial}`);
-        try {
-            lastResult = await runBrowserRedeemAfterNotification(serial);
-        } catch (error) {
-            lastResult = {
-                completed: false,
-                success: false,
-                stage: 'exception',
-                message: error.message
-            };
-            log(`[BROWSER] รอบที่ ${attempt} เกิดข้อผิดพลาด: ${error.message}`);
-        }
-
-        if (lastResult && lastResult.success === true) {
-            return lastResult;
-        }
-
-        if (attempt < maxAttempts) {
-            log(`[BROWSER] รอบที่ ${attempt} ไม่สำเร็จ รอ 10 วินาทีก่อนลองใหม่...`);
-            await sleep(10000);
-        }
-    }
-
-    log(`[BROWSER] ใช้ itemcode ไม่สำเร็จครบ ${maxAttempts} รอบ: ${serial}`);
-    return lastResult;
 }
 
 // Send Telegram Notification
@@ -1133,7 +1122,7 @@ async function sendTelegram(message, redeemResult = null) {
         const reason = data.message || data.error || redeemResult.message || "Unknown error";
 
         // Ignore invalid itemcode spam
-        if (isInvalidItemCodeMessage(reason)) {
+        if (reason.toLowerCase().includes("invalid itemcode")) {
             return false;
         }
     }
@@ -1159,62 +1148,6 @@ async function sendTelegram(message, redeemResult = null) {
         log(`[-] Telegram network error: ${e.message}`);
     }
     return true;
-}
-
-// Send Discord Webhook Notification
-async function sendDiscord(message, redeemResult = null) {
-    const isEnabled = config.discord_enabled !== undefined ? !!config.discord_enabled : !!config.discord_webhook_url;
-    if (!isEnabled) {
-        return false;
-    }
-
-    if (redeemResult && !redeemResult.success) {
-        const data = redeemResult.data || {};
-        const reason = data.message || data.error || redeemResult.message || "Unknown error";
-
-        // Ignore invalid itemcode spam
-        if (isInvalidItemCodeMessage(reason)) {
-            return false;
-        }
-    }
-
-    // Support both single string (comma-separated) and array of URLs
-    let urls = [];
-    if (Array.isArray(config.discord_webhook_url)) {
-        urls = config.discord_webhook_url.filter(Boolean);
-    } else if (typeof config.discord_webhook_url === 'string') {
-        urls = config.discord_webhook_url.split(',').map(u => u.trim()).filter(Boolean);
-    }
-
-    if (urls.length === 0) {
-        return false;
-    }
-
-    const payload = {
-        username: "TalesRunner Bot",
-        content: message
-    };
-
-    let sentAny = false;
-    for (const url of urls) {
-        try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (res.ok) {
-                log(`[+] Discord Notification sent to ${url.substring(0, 45)}...`);
-                sentAny = true;
-            } else {
-                const txt = await res.text();
-                log(`[-] Discord Webhook (${url.substring(0, 45)}...) returned failure (HTTP ${res.status}): ${txt}`);
-            }
-        } catch (e) {
-            log(`[-] Discord network error for ${url.substring(0, 45)}...: ${e.message}`);
-        }
-    }
-    return sentAny;
 }
 
 // Parse wait time from message
@@ -1245,73 +1178,6 @@ function parseWaitTime(msg) {
         }
     }
     return 60;
-}
-
-async function retryCheckSerialAndNotify(serial, initialMessage) {
-    const initialMessageLower = String(initialMessage || '').toLowerCase();
-    let waitSeconds = initialMessageLower.includes('please wait')
-        ? parseWaitTime(initialMessage)
-        : 10;
-    let lastResult = null;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        log(`[*] Node: รอ ${waitSeconds} วินาทีก่อน check serial ซ้ำ (รอบที่ ${attempt}/3): ${serial}`);
-        await sleep(waitSeconds * 1000);
-
-        log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (check serial รอบที่ ${attempt}/3)...`);
-        await loginWithCredentials(config.username, config.password);
-
-        log(`[*] Node: กำลัง check serial ซ้ำรอบที่ ${attempt}/3 เพื่ออ่านรายการรางวัล: ${serial}...`);
-        lastResult = await redeemCode(serial);
-        const retryCheckSuccess = lastResult && lastResult.checkSuccess;
-        const retryData = (lastResult && lastResult.data) || {};
-        const retryMessage = retryData.message || retryData.error || (lastResult && lastResult.message) || 'Unknown error';
-        const retryMessageLower = String(retryMessage).toLowerCase();
-
-        if (retryCheckSuccess) {
-            log(`[🎉] Node: check serial ซ้ำสำเร็จในรอบที่ ${attempt}: ${serial}`);
-
-            let messageToSend = 'ไม่ทราบรางวัล';
-            if (lastResult.checkData) {
-                try {
-                    const reward = lastResult.checkData.data?.reward;
-                    const bundle = reward?.bundle;
-                    if (bundle && bundle.name) {
-                        const bundleName = bundle.name;
-                        const items = bundle.items || [];
-                        const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
-                        const itemDetails = itemNames.join(',');
-                        messageToSend = itemDetails || bundleName;
-                    }
-                } catch (error) {
-                    log(`[-] Error formatting retry reward message: ${error.message}`);
-                }
-            }
-
-            const sentTelegram = await sendTelegram(messageToSend, lastResult);
-            const sentDiscord = await sendDiscord(messageToSend, lastResult);
-            return {
-                retrySuccess: true,
-                result: lastResult,
-                sentTelegram,
-                sentDiscord
-            };
-        }
-
-        const stillWaiting = retryMessageLower.includes('please wait') ||
-            retryMessageLower.includes('captcha token field is required') ||
-            retryMessageLower.includes('captcha type is present');
-        if (!stillWaiting) {
-            log(`[❌] Node: check serial ซ้ำล้มเหลวด้วยข้อผิดพลาดอื่น: ${retryMessage}`);
-            break;
-        }
-
-        waitSeconds = retryMessageLower.includes('please wait')
-            ? parseWaitTime(retryMessage)
-            : 10;
-    }
-
-    return { retrySuccess: false, result: lastResult, sentTelegram: false, sentDiscord: false };
 }
 
 // Sleep OCR function helper
@@ -1596,44 +1462,97 @@ async function processScan(directUrl) {
                     if (isWaitOnly) {
                         log(`[!] Node: ตรวจพบข้อความ Please wait/Captcha: "${msg}". ส่งแจ้งเตือนด่วน...`);
                         let sentTele = await sendTelegram(varCode, redeemResult);
-                        let sentDisc = await sendDiscord(varCode, redeemResult);
-                        if (sentTele || sentDisc) {
+                        if (sentTele) {
                             logNotifiedCode(varCode);
                         }
                         notified = true;
 
-                        // Browser redemption and API check-retry run independently.
-                        // The browser uses the secondary account; the API check uses the primary token.
-                        const browserPromise = runBrowserRedeemWithRetries(varCode, 5);
-                        const checkPromise = retryCheckSerialAndNotify(varCode, msg);
-                        const [browserSettled, checkSettled] = await Promise.allSettled([
-                            browserPromise,
-                            checkPromise
-                        ]);
+                        const browserResult = await runBrowserRedeemAfterNotification(varCode);
+                        if (browserResult) {
+                            for (const v of variations) {
+                                history.add(v);
+                            }
+                            history.add(code);
+                            saveHistory();
 
-                        const browserResult = browserSettled.status === 'fulfilled'
-                            ? browserSettled.value
-                            : null;
-                        if (browserSettled.status === 'rejected') {
-                            log(`[BROWSER] retry flow ล้มเหลว: ${browserSettled.reason?.message || browserSettled.reason}`);
+                            if (sentTele) {
+                                await sleepOcr(10);
+                            }
+
+                            success = true;
+                            break;
                         }
 
-                        const retryOutcome = checkSettled.status === 'fulfilled'
-                            ? checkSettled.value
-                            : { retrySuccess: false, result: null, sentTelegram: false, sentDiscord: false };
-                        if (checkSettled.status === 'rejected') {
-                            log(`[❌] Node: check serial retry flow ล้มเหลว: ${checkSettled.reason?.message || checkSettled.reason}`);
+                        let waitSeconds = 10;
+                        if (msgStr.includes("please wait")) {
+                            waitSeconds = parseWaitTime(msg);
+                        }
+                        log(`[*] Node: ตรวจพบให้รอตามระบบ: ${waitSeconds} วินาที...`);
+
+                        let retrySuccess = false;
+                        let waitFailCount = 1;
+
+                        for (let attempt = 1; attempt <= 3; attempt++) {
+                            log(`[*] Node: กำลังนอนรอ ${waitSeconds} วินาทีก่อนลองใหม่ (Attempt ${attempt}/3)...`);
+                            await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+
+                            log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (Attempt ${attempt}/3)...`);
+                            await loginWithCredentials(config.username, config.password);
+
+                            log(`[*] Node: กำลังลองใหม่รอบที่ ${attempt}/3: ${varCode}...`);
+                            let retryResult = await redeemCode(varCode);
+                            let retryCheckSuccess = retryResult && retryResult.checkSuccess;
+                            let retryData = (retryResult && retryResult.data) || {};
+                            let retryMsg = retryData.message || retryData.error || (retryResult && retryResult.message) || "Unknown error";
+                            let retryMsgStr = String(retryMsg).toLowerCase();
+
+                            if (retryCheckSuccess) {
+                                log(`[🎉] Node: ลองใหม่สำเร็จในรอบที่ ${attempt}!`);
+                                redeemResult = retryResult;
+                                retrySuccess = true;
+                                break;
+                            }
+
+                            if (retryMsgStr.includes("please wait") || retryMsgStr.includes("captcha token field is required") || retryMsgStr.includes("captcha type is present")) {
+                                waitFailCount++;
+                                if (waitFailCount > 3) {
+                                    log(`[❌] Node: เกิดข้อผิดพลาด Please wait/Captcha เกิน 3 ครั้งแล้ว (สะสม). ข้ามโค้ดนี้เลย...`);
+                                    break;
+                                }
+                                if (retryMsgStr.includes("please wait")) {
+                                    waitSeconds = parseWaitTime(retryMsg);
+                                } else {
+                                    waitSeconds = 10;
+                                }
+                            } else {
+                                log(`[❌] Node: ลองใหม่ล้มเหลวด้วยข้อผิดพลาดอื่น: ${retryMsg}. หยุดลองใหม่...`);
+                                break;
+                            }
                         }
 
-                        if (retryOutcome.retrySuccess) {
-                            redeemResult = retryOutcome.result;
-                            sentTele = retryOutcome.sentTelegram || sentTele;
-                            sentDisc = retryOutcome.sentDiscord || sentDisc;
-                        }
+                        if (retrySuccess) {
+                            let retryMessageToSend = "ไม่ทราบรางวัล";
+                            if (redeemResult.checkData) {
+                                try {
+                                    const reward = redeemResult.checkData.data?.reward;
+                                    const bundle = reward?.bundle;
+                                    if (bundle && bundle.name) {
+                                        const bundleName = bundle.name;
+                                        const items = bundle.items || [];
+                                        const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
+                                        const itemDetails = itemNames.join(",");
+                                        if (itemDetails) {
+                                            retryMessageToSend = `${itemDetails}`;
+                                        } else {
+                                            retryMessageToSend = `${bundleName}`;
+                                        }
+                                    }
+                                } catch (e) {
+                                    log(`[-] Error formatting retry message: ${e.message}`);
+                                }
+                            }
+                            sentTele = await sendTelegram(retryMessageToSend, redeemResult);
 
-                        const browserSuccess = browserResult && browserResult.success === true;
-                        if (browserSuccess || retryOutcome.retrySuccess) {
-                            log(`[+] Node: parallel retry จบสำเร็จ (Browser=${browserSuccess ? 'สำเร็จ' : 'ไม่สำเร็จ'}, Check=${retryOutcome.retrySuccess ? 'สำเร็จ' : 'ไม่สำเร็จ'})`);
                         }
 
                         for (const v of variations) {
@@ -1642,7 +1561,7 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
+                        if (sentTele) {
                             await sleepOcr(10);
                         }
                         
@@ -1652,7 +1571,6 @@ async function processScan(directUrl) {
 
                     if (shouldNotify) {
                         let sentTele = true;
-                        let sentDisc = true;
                         if (!notified) {
                             if (checkSuccess) {
                                 log(`[⭐] Node: ตรวจพบโค้ดผ่าน Check Serial (200 OK): ${varCode}. ส่งแจ้งเตือน...`);
@@ -1681,8 +1599,7 @@ async function processScan(directUrl) {
                                 }
                             }
                             sentTele = await sendTelegram(messageToSend, redeemResult);
-                            sentDisc = await sendDiscord(messageToSend, redeemResult);
-                            if (sentTele || sentDisc) {
+                            if (sentTele) {
                                 logNotifiedCode(varCode);
                             }
                             notified = true;
@@ -1698,7 +1615,7 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
+                        if (sentTele) {
                             await sleepOcr(10);
                         }
                         
@@ -1911,8 +1828,6 @@ async function main() {
     log(`  ช่อง/วิดีโอเป้าหมาย: ${config.youtube_url}`);
     log(`  ความถี่ในการสแกน: ${config.scan_interval} วินาที`);
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
-    const hasDiscord = Array.isArray(config.discord_webhook_url) ? config.discord_webhook_url.length > 0 : !!config.discord_webhook_url;
-    log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     log(`  Browser itemcode ด้วยบัญชีสำรอง: ${config.browser_redeem_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     if (config.proxy_url) {
         log(`  Proxy Server: ${config.proxy_url}`);

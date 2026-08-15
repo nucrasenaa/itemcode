@@ -1,0 +1,34 @@
+# Credentials & Tokens (Critical)
+service_config.json
+web_config.json
+.session_config.json
+
+# Local log files
+*.log
+node_service.log
+notified_codes.log
+
+# Playwright browser profile and authenticated state
+.browser-profile/
+.auth/
+node_modules/
+
+# Databases & local history
+ocr_history.json
+
+# Compiled OCR binaries
+ocr_helper
+ocr_helper
+
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Temporary captured frames
+*.png
+*.mp4
+*.part
+
+# macOS system files
+.DS_Store

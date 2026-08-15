@@ -24,6 +24,14 @@
 * **รูปแบบการใช้งาน:** สุ่ม code ตาม pattern, ตรวจด้วย `check-serial`, บันทึก code ที่ใช้ได้ และกันการสุ่มซ้ำด้วย `log.json`
 * **ลิงก์หน้าคู่มือและตัวติดตั้ง:** ดูรายละเอียดได้ที่ [web_app/README.md](file:///Users/crase/OS/itemcode/web_app/README.md)
 
+### 4. [equality-itemcode-version](file:///Users/crase/OS/itemcode/equality-itemcode-version/README.md)
+รุ่นแยกของ Node.js Service ที่ตัด Discord ออก เหลือ Telegram แบบ optional
+และใช้ Browser flow อัตโนมัติสำหรับ login, Turnstile และการใช้ itemcode:
+
+```bash
+bash equality-itemcode-version/install.sh
+```
+
 ---
 
 ## ⚙️ ข้อกำหนดหลัก (Requirements)

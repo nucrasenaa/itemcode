@@ -1,0 +1,20 @@
+{
+  "name": "equality-itemcode-version",
+  "version": "1.0.0",
+  "description": "ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รองรับ macOS, Windows และ Ubuntu/Linux พร้อมแจ้งเตือนผ่าน Telegram แบบเลือกใช้ได้",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No automated tests configured\"",
+    "test:login": "node playwright_login.mjs",
+    "test:login:show": "node browser_login_test.mjs --show-chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cloakbrowser": "^0.3.30",
+    "playwright": "^1.62.1",
+    "puppeteer-core": "^25.0.4"
+  }
+}
