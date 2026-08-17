@@ -23,6 +23,8 @@
   "password2": "YOUR_SECONDARY_HOF_PASSWORD",
   "browser_redeem_enabled": false,
   "browser_redeem_headless": true,
+  "browser_token_login_enabled": true,
+  "browser_token_login_headless": true,
   "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
   "proxy_url": "",
   "ytdl_cookies_from_browser": "",

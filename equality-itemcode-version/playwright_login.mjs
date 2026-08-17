@@ -38,11 +38,16 @@ const TURNSTILE_INPUT_SELECTOR = 'input[name="cf-turnstile-response"]';
 const TURNSTILE_WRAPPER_SELECTOR =
   'div:has(> div > div > input[name="cf-turnstile-response"])';
 
+function parseConfigJson(text) {
+  // รองรับ comment แบบบรรทัดเดียวใน service_config.json
+  return JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
+}
+
 async function loadCredentials() {
   let config;
 
   try {
-    config = JSON.parse(await fs.readFile(CONFIG_FILE, "utf8"));
+    config = parseConfigJson(await fs.readFile(CONFIG_FILE, "utf8"));
   } catch (error) {
     throw new Error(`อ่าน config ไม่สำเร็จ (${CONFIG_FILE}): ${error.message}`);
   }

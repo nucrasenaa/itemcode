@@ -1,132 +1,211 @@
-# 🎮 TalesRunner ItemCode Watcher — Headless Node.js Service
+# TalesRunner ItemCode Watcher — `node_service`
 
-ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รวดเร็วและกินทรัพยากรเครื่องน้อยมาก  
-รองรับทั้ง **macOS**, **Windows** และ **Ubuntu/Linux VPS** พร้อมแจ้งเตือนผ่าน **Telegram** และ **Discord**
 
----
+บริการ Node.js สำหรับเฝ้าดูไลฟ์ TalesRunner, อ่าน itemcode จากภาพ, ตรวจสอบ serial
+กับ HOF และแจ้งเตือนเมื่อพบ code รองรับ macOS, Windows และ Linux
 
-## ✨ ฟีเจอร์หลัก
-* 📺 **OCR สแกนไลฟ์สตรีม:** ดึงภาพเฟรมตรงจาก YouTube Live และอ่านตัวหนังสือบนจอด้วย AI-OCR
-* 🔑 **ตรวจสอบโค้ดอัตโนมัติ (Check Serial):** ยิงเช็ค API ของ HOF ทันทีเพื่อดูความถูกต้องและรางวัล
-* 📲 **ระบบแจ้งเตือนด่วน:** ส่งรหัสเข้า Telegram/Discord ทันทีที่พบเพื่อให้สามารถกดเคลมเองได้สะดวก
-* ⏳ **Rate-limit / Captcha Handling:** รอและจัดระบบล็อกอิน (Re-auth) อัตโนมัติเมื่อชนขีดจำกัด
-* 🖥️ **Cross-platform:** ใช้ Apple Vision Framework บน macOS, WinRT OCR บน Windows และ Tesseract OCR บน Linux
+โปรเจกต์นี้ยังรองรับการแจ้งเตือนทั้ง **Telegram** และ **Discord** ส่วนการใช้ itemcode
+ผ่านหน้าเว็บทำงานด้วย CloakBrowser และ Turnstile ใน Browser
 
----
-
-## 🚀 การติดตั้ง
+## ติดตั้ง
 
 ### macOS
-1. เปิด Terminal เข้ามาในโฟลเดอร์นี้:
-   ```bash
-   cd node_service
-   ```
-2. รันสคริปต์ติดตั้ง:
-   ```bash
-   chmod +x install_mac.sh
-   ./install_mac.sh
-   ```
 
-### Windows
-1. เปิด PowerShell (หรือคลิกขวาที่ไฟล์) แล้วรัน:
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File install_win.ps1
-   ```
-
-### Linux (VPS / Ubuntu Server)
-1. ติดตั้งแพ็กเกจระบบที่จำเป็น (Tesseract OCR, FFmpeg และ yt-dlp):
-   * สำหรับ Debian/Ubuntu (เช่น Ubuntu 20.04+):
-     ```bash
-     sudo apt-get update
-     sudo apt-get install -y tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng ffmpeg
-     ```
-   * ติดตั้ง `yt-dlp` เวอร์ชันล่าสุด:
-     ```bash
-     sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
-     sudo chmod a+rx /usr/local/bin/yt-dlp
-     ```
-2. ติดตั้ง dependencies ของ Node.js:
-   ```bash
-   cd node_service
-   npm install
-   ```
-
----
-
-## ⚙️ การตั้งค่า (`service_config.json`)
-
-คัดลอกจากตัวอย่างแล้วแก้ไขข้อมูลบัญชีและโทเคน:
 ```bash
+cd node_service
+chmod +x install_mac.sh
+./install_mac.sh
+npm install
+```
+
+สคริปต์จะติดตั้ง Homebrew dependencies, Node.js, `yt-dlp`, FFmpeg และ compile
+Apple Vision OCR helper ให้
+
+### Windows PowerShell
+
+```powershell
+cd <โฟลเดอร์โปรเจกต์>\node_service
+powershell -ExecutionPolicy Bypass -File .\install_win.ps1
+npm install
+```
+
+### Ubuntu/Debian Linux
+
+```bash
+sudo apt-get update
+sudo apt-get install -y nodejs npm ffmpeg tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng
+sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+cd /path/to/itemcode/node_service
+npm install
+```
+
+แนะนำ Node.js 20 ขึ้นไปเพื่อให้ Browser dependencies ทำงานตรงกับสภาพแวดล้อมที่ทดสอบ
+
+## ภาพรวมการทำงาน
+
+1. ดึงภาพจาก `youtube_url` ตามรอบเวลาที่กำหนด
+2. ใช้ OCR อ่าน itemcode และสร้างชุดรหัสที่ใกล้เคียง
+3. ตรวจสอบ serial ผ่าน HOF API ด้วย `access_token`
+4. แจ้ง code ที่พบไปยัง Telegram/Discord ตามที่เปิดใช้งาน
+5. ถ้าเปิด `browser_redeem_enabled` ให้ใช้บัญชี `username2/password2` เปิดหน้า
+   itemcode กรอก code และกด `ใช้ไอเทมโค้ด`
+6. แจ้งผลการทำรายการผ่าน Browser ไปยัง Telegram เพิ่มเติม
+7. หาก Browser redeem ไม่สำเร็จ จะลองใหม่สูงสุด 5 รอบ โดยเว้น 10 วินาที
+
+## บัญชีที่ใช้ในระบบ
+
+| ค่า | ใช้ทำอะไร |
+|---|---|
+| `username` / `password` | บัญชีหลัก ใช้ login ผ่าน Browser เพื่อรับ `access_token` และใช้ตรวจสอบ/check serial ผ่าน API |
+| `username2` / `password2` | บัญชีรอง ใช้ login ผ่าน Browser เพื่อเปิดหน้า itemcode และเคลม code |
+
+บัญชีทั้งสองชุดใช้แยกกันได้ และไม่จำเป็นต้องเป็นบัญชีเดียวกัน
+
+## ตั้งค่า `service_config.json`
+
+สร้างไฟล์จากตัวอย่าง:
+
+```bash
+cd node_service
 cp service_config.json.example service_config.json
 ```
 
-| ฟิลด์ | คำอธิบาย |
+จากนั้นแก้ค่าเหล่านี้:
+
+| ฟิลด์ | รายละเอียด |
 |---|---|
-| `youtube_url` | URL ช่อง YouTube ที่ต้องการสแกนสด |
-| `telegram_token` | Bot Token จาก @BotFather |
-| `telegram_chat_id` | Chat ID ที่ต้องการให้บอทส่งข้อความแจ้งเตือน |
-| `telegram_enabled` | `true` / `false` |
-| `discord_webhook_url` | Discord Webhook URL |
-| `discord_enabled` | `true` / `false` |
-| `scan_interval` | ความถี่ในการจับภาพสแกน (วินาที, default: `10`) |
-| `username` | บัญชี HOF หลัก |
-| `password` | รหัสผ่านบัญชี HOF หลัก |
-| `username2` | บัญชี HOF สำรองสำหรับเปิดหน้า itemcode |
-| `password2` | รหัสผ่านบัญชี HOF สำรอง |
-| `browser_redeem_enabled` | `true` เพื่อให้เปิด browser บัญชีสำรองหลังส่งแจ้งเตือน แล้วกรอกและใช้ itemcode ผ่านหน้าเว็บ |
-| `browser_redeem_headless` | `true` เพื่อเปิด browser แบบเบื้องหลัง; ค่าเริ่มต้นเป็น `true` |
-| `game_id` | รหัสอ้างอิงเกมของ Talesrunner |
-| `proxy_url` | URL ของ Proxy Server เช่น `http://127.0.0.1:8118` (รองรับ HTTP/HTTPS Proxy) |
+| `youtube_url` | URL ช่องหรือไลฟ์ที่ต้องการสแกน |
+| `username` / `password` | บัญชีหลักสำหรับ login และ check serial |
+| `username2` / `password2` | บัญชีรองสำหรับใช้ itemcode ผ่าน Browser |
+| `browser_token_login_enabled` | เปิด Browser login เพื่อดึง `access_token` อัตโนมัติ; ค่าเริ่มต้น `true` |
+| `browser_token_login_headless` | `true` ทำงานเบื้องหลัง, `false` เปิดหน้าต่าง Browser |
+| `browser_redeem_enabled` | เปิด flow กรอกและใช้ itemcode ผ่าน Browser |
+| `browser_redeem_headless` | `true` ทำงานเบื้องหลัง, `false` เปิดหน้าต่าง Browser |
+| `telegram_token` | Telegram Bot Token; ไม่บังคับ |
+| `telegram_chat_id` | Telegram Chat ID; ไม่บังคับ |
+| `telegram_enabled` | เปิด/ปิด Telegram |
+| `discord_webhook_url` | Discord Webhook URL หรือรายการ URL |
+| `discord_enabled` | เปิด/ปิด Discord |
+| `scan_interval` | ช่วงเวลาระหว่างการสแกนภาพ หน่วยวินาที |
+| `regex_pattern` | รูปแบบ code ที่ OCR จะค้นหา |
+| `game_id` | Game ID ของ TalesRunner |
+| `proxy_url` | HTTP/HTTPS Proxy; ปล่อยว่างถ้าไม่ใช้ |
 
----
+ถ้าไม่ได้ใส่ `browser_token_login_enabled` หรือ `browser_token_login_headless` ระบบจะ
+เติมค่าเริ่มต้นเป็น `true` ให้เอง
 
-## 🎯 วิธีใช้งาน
+## การ login และรับ `access_token`
 
-```bash
-# รันระบบปกติ (ไม่ผ่าน Proxy)
-node index.js
+เมื่อไม่มี session ที่ใช้งานได้ ระบบจะทำตามลำดับนี้:
 
-# รันระบบผ่าน Proxy (เช่น Tor/Privoxy)
-node index.js
-```
-* โปรแกรมจะทำงานในรูปแบบ Background / Console-only
-* บันทึกความเคลื่อนไหวลงในหน้าจอ Terminal และบันทึกล็อกเข้า `node_service.log`
+1. เปิดหน้า HOF login ด้วย CloakBrowser
+2. ผ่าน Cloudflare/Turnstile อัตโนมัติ
+3. login ด้วย `username/password`
+4. อ่าน `access_token` จาก Cookie หรือ Browser Storage
+5. บันทึกลง `.session_config.json` โดยไม่แสดงค่าจริงของ token
+6. ใช้ token ที่บันทึกไว้สำหรับ check serial
+7. หาก Browser login ไม่สำเร็จ จะลอง OAuth PKCE เป็น fallback
 
-### ทดสอบ flow ใช้ itemcode ผ่าน browser
+ดังนั้นการใช้งานปกติไม่ต้องติดตั้ง extension หรือใส่ Turnstile key เพิ่ม
 
-คำสั่งนี้ใช้บัญชี `username2/password2` เปิดหน้า login แล้วไปที่หน้า
-Tales Runner itemcode จากนั้นรอ Turnstile และกดปุ่ม `ใช้ไอเทมโค้ด`:
-
-```bash
-node index.js --test-browser-redeem KEXEDP8BSF8P
-```
-
-เมื่อระบบแจ้งเตือน Telegram/Discord สำเร็จแล้ว flow เดียวกันจะถูกเรียกอัตโนมัติ
-ถ้า `browser_redeem_enabled` เป็น `true`.
-
-### ทดสอบล็อกอินด้วย Playwright
-
-สคริปต์จะอ่าน `username` และ `password` จาก `service_config.json` โดยตรง เปิด
-browser แบบมีหน้าต่างให้ทำ Cloudflare challenge ด้วยตนเองเมื่อพบ แล้วบันทึก
-authenticated state ไว้ที่ `node_service/.auth/thehof.json`:
+### ทดสอบ Browser login โดยตรง
 
 ```bash
 cd node_service
-npm run test:login
+node index.js --test-browser-token-login
 ```
 
-หรือเรียกโหมดเปิด Chromium ให้เห็นโดยตรง:
+คำสั่งนี้จะ login บัญชีหลัก, บันทึก session แล้วจบการทำงานโดยไม่เริ่มสแกนไลฟ์
+
+### ทางเลือกสำรอง: Cookie-Editor
+
+1. ติดตั้ง [Cookie-Editor สำหรับ Microsoft Edge](https://microsoftedge.microsoft.com/addons/detail/cookieeditor/neaplmfkghagebokkhpjpoebhdledlfi)
+2. เปิด [หน้า HOF login](https://passport.thehof.gg/hall-of-fame-web/login)
+3. login และทำ Turnstile ให้เสร็จ
+4. เปิด Cookie-Editor แล้วค้นหา `access_token`
+5. คัดลอกค่าในช่อง `Value` แล้วตั้งค่า:
+
+```bash
+node index.js --set-token "<ACCESS_TOKEN>"
+```
+
+`access_token` เป็นข้อมูลลับ ห้ามส่งในแชต ห้าม commit และห้ามใส่ไว้ใน README
+
+## คำสั่งใช้งานและทดสอบ
+
+### รันระบบจริง
 
 ```bash
 cd node_service
+node index.js
+```
+
+### รันเบื้องหลังบน macOS/Linux
+
+```bash
+nohup node index.js > node_service.log 2>&1 &
+```
+
+### ทดสอบ login แบบเปิด Chromium
+
+```bash
 npm run test:login:show
-# เทียบเท่า: node browser_login_test.mjs --show-chromium
 ```
 
-คำสั่งนี้ใช้ CloakBrowser และกด Turnstile อัตโนมัติ หากต้องการทดสอบบัญชีสำรอง:
+ทดสอบบัญชีรอง:
 
 ```bash
 HOF_ACCOUNT=secondary npm run test:login:show
 ```
 
-ไฟล์ profile และ auth state เป็นข้อมูลลับและถูกกำหนดไว้ใน `.gitignore` แล้ว
+### ทดสอบ Browser redeem ด้วย code จำลอง
+
+```bash
+node index.js --test-browser-redeem KEXEDP8BSF8P
+```
+
+คำสั่งนี้ใช้ `username2/password2` เปิดหน้า itemcode, กรอก code, ผ่าน Turnstile,
+กดปุ่มใช้ itemcode และแสดงผลลัพธ์โดยไม่เริ่มสแกนไลฟ์
+
+### ตรวจสอบ serial ผ่าน API
+
+```bash
+node index.js --redeem KEXEDP8BSF8P
+```
+
+## การทำงานแบบ Headless/Visible
+
+ค่าปกติทำงานแบบเบื้องหลัง:
+
+```json
+"browser_token_login_headless": true,
+"browser_redeem_headless": true
+```
+
+ถ้าต้องการดู Browser ตอนทดสอบ login token:
+
+```bash
+BROWSER_TOKEN_LOGIN_HEADLESS=false node index.js --test-browser-token-login
+```
+
+## ไฟล์ runtime และข้อมูลลับ
+
+ไฟล์ต่อไปนี้สร้างระหว่างทำงานและไม่ควร commit:
+
+- `service_config.json`
+- `.session_config.json`
+- `.browser-profile/`
+- `.auth/`
+- `ocr_history.json`
+- `notified_codes.log`
+- `node_service.log`
+
+## แก้ปัญหาเบื้องต้น
+
+- **ไม่มี token:** ตรวจ `username/password` และลอง `node index.js --test-browser-token-login`
+- **Turnstile ไม่ผ่าน:** ลองโหมด visible ด้วย `BROWSER_TOKEN_LOGIN_HEADLESS=false`
+- **หน้า itemcode ไม่ทำงาน:** ตรวจ `username2/password2` และ `browser_redeem_enabled`
+- **ไม่มีข้อความแจ้งเตือน:** ตรวจ `telegram_token`, `telegram_chat_id`, `telegram_enabled`
+  หรือค่า Discord ที่เกี่ยวข้อง
+- **OCR ไม่ทำงาน:** ตรวจ `yt-dlp`, FFmpeg, Tesseract หรือ `ocr_helper` ตามระบบปฏิบัติการ

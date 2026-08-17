@@ -158,6 +158,12 @@ function loadConfig() {
             if (config.browser_redeem_headless === undefined) {
                 config.browser_redeem_headless = true;
             }
+            if (config.browser_token_login_enabled === undefined) {
+                config.browser_token_login_enabled = true;
+            }
+            if (config.browser_token_login_headless === undefined) {
+                config.browser_token_login_headless = true;
+            }
             if (!config.ytdl_cookies_from_browser) config.ytdl_cookies_from_browser = "";
             if (!config.ytdl_cookies_file) config.ytdl_cookies_file = "";
         } else {
@@ -184,6 +190,8 @@ function loadConfig() {
             password2: "",
             browser_redeem_enabled: false,
             browser_redeem_headless: true,
+            browser_token_login_enabled: true,
+            browser_token_login_headless: true,
             game_id: "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
             proxy_url: "",
             ytdl_cookies_from_browser: "",
@@ -447,6 +455,153 @@ async function loginWithCredentials(username, password) {
         log(`[-] Node: เกิดข้อผิดพลาดระหว่างล็อกอิน: ${e.message}`);
         isAutoLoginDisabled = true;
         return false;
+    }
+}
+
+// Log in through the browser, then reuse the access_token cookie for API checks.
+async function loginWithBrowserForAccessToken(username, password) {
+    username = username || config.username || "";
+    password = password || config.password || "";
+    if (!username || !password) return false;
+
+    let browser;
+    try {
+        const { launch } = await import('cloakbrowser/puppeteer');
+        const headless = process.env.BROWSER_TOKEN_LOGIN_HEADLESS !== 'false' &&
+            config.browser_token_login_headless !== false;
+        log(`[BROWSER-AUTH] กำลัง login เพื่อดึง access_token (${headless ? 'headless' : 'headed'})...`);
+        browser = await launch({ headless, humanize: true, args: [] });
+        const pages = await browser.pages();
+        const page = pages[0] || await browser.newPage();
+        page.setDefaultNavigationTimeout(120000);
+
+        const sleepMs = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        async function waitForTurnstileToken(timeoutMs = 30000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                const token = await page.$eval(
+                    'input[name="cf-turnstile-response"]',
+                    el => el.value || ''
+                ).catch(() => '');
+                if (token) return true;
+                await sleepMs(500);
+            }
+            return false;
+        }
+
+        async function clickTurnstileIfVisible(timeoutMs = 120000) {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (await waitForTurnstileToken(1000)) return true;
+
+                const wrapper = await page.$('div:has(> div > div > input[name="cf-turnstile-response"])');
+                const wrapperBox = wrapper ? await wrapper.boundingBox().catch(() => null) : null;
+                if (wrapperBox && wrapperBox.width > 250 && wrapperBox.height > 40) {
+                    await sleepMs(800);
+                    await page.mouse.click(wrapperBox.x + 22, wrapperBox.y + 32);
+                } else {
+                    const iframe = await page.$('iframe[src*="challenges.cloudflare.com"]');
+                    const iframeBox = iframe ? await iframe.boundingBox().catch(() => null) : null;
+                    if (iframeBox && iframeBox.width > 250 && iframeBox.height > 40) {
+                        await sleepMs(800);
+                        await page.mouse.click(iframeBox.x + 42, iframeBox.y + 45);
+                    }
+                }
+
+                if (await waitForTurnstileToken(2000)) return true;
+            }
+            return false;
+        }
+
+        async function getAccessTokenFromBrowser() {
+            const urls = [
+                `${PASSPORT_BASE_URL}/`,
+                `${PASSPORT_BASE_URL}/hall-of-fame-web/login`,
+                `https://${MEMBER_DOMAIN}/`,
+                `https://${MEMBER_DOMAIN}/oauth/callback`
+            ];
+            const cookies = [];
+            for (const url of urls) {
+                const scoped = await page.cookies(url).catch(() => []);
+                cookies.push(...scoped);
+            }
+            const accessCookie = cookies.find(cookie => cookie.name === 'access_token' && cookie.value);
+            if (accessCookie) return accessCookie.value;
+
+            return await page.evaluate(() => {
+                for (const storage of [window.localStorage, window.sessionStorage]) {
+                    for (const key of ['access_token', 'accessToken']) {
+                        const value = storage.getItem(key);
+                        if (value) return value;
+                    }
+                }
+                return '';
+            }).catch(() => '');
+        }
+
+        await page.goto(`${PASSPORT_BASE_URL}/hall-of-fame-web/login`, {
+            waitUntil: 'domcontentloaded'
+        });
+
+        if ((await page.content()).includes('challenge-platform')) {
+            log(`[BROWSER-AUTH] พบ Cloudflare challenge กำลังดำเนินการอัตโนมัติ...`);
+            const solved = await clickTurnstileIfVisible();
+            if (!solved) throw new Error('ไม่สามารถผ่าน Cloudflare challenge ได้');
+            for (let i = 0; i < 60 && (await page.content()).includes('challenge-platform'); i++) {
+                await sleepMs(1000);
+            }
+        }
+
+        await page.goto(`${PASSPORT_BASE_URL}/hall-of-fame-web/login`, {
+            waitUntil: 'domcontentloaded'
+        });
+        const usernameInput = await page.waitForSelector(
+            'input[name="username"], input[type="email"]',
+            { visible: true, timeout: 60000 }
+        );
+        const passwordInput = await page.waitForSelector(
+            'input[name="password"], input[type="password"]',
+            { visible: true, timeout: 60000 }
+        );
+        await usernameInput.type(username);
+        await passwordInput.type(password);
+
+        const loginCaptchaSolved = await waitForTurnstileToken(5000) ||
+            await clickTurnstileIfVisible(120000);
+        if (!loginCaptchaSolved) throw new Error('ไม่พบ access_token หลังผ่าน Turnstile หน้า login');
+
+        const submit = await page.$('button[type="submit"], input[type="submit"]');
+        if (!submit) throw new Error('ไม่พบปุ่ม submit หน้า login');
+        await Promise.allSettled([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 120000 }),
+            submit.click()
+        ]);
+        await sleepMs(2500);
+
+        if (page.url().includes('/login')) {
+            throw new Error('ล็อกอินผ่าน Browser ไม่สำเร็จ');
+        }
+
+        const token = await getAccessTokenFromBrowser();
+        if (!token) throw new Error('ล็อกอินสำเร็จแต่ไม่พบ access_token ใน Browser');
+
+        accessToken = token;
+        currentLoggedInUser = username;
+        isAutoLoginDisabled = false;
+        saveSession(accessToken, username);
+        log(`[BROWSER-AUTH] ได้ access_token จาก Browser และบันทึก session แล้ว`);
+        logTokenExpiration(accessToken);
+        return true;
+    } catch (e) {
+        log(`[BROWSER-AUTH] login เพื่อดึง access_token ล้มเหลว: ${e.message}`);
+        return false;
+    } finally {
+        if (browser) {
+            try {
+                await browser.close();
+            } catch (e) { }
+        }
     }
 }
 
@@ -1913,6 +2068,7 @@ async function main() {
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     const hasDiscord = Array.isArray(config.discord_webhook_url) ? config.discord_webhook_url.length > 0 : !!config.discord_webhook_url;
     log(`  แจ้งเตือน Discord: ${hasDiscord ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    log(`  Browser login ดึง access_token: ${config.browser_token_login_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     log(`  Browser itemcode ด้วยบัญชีสำรอง: ${config.browser_redeem_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     if (config.proxy_url) {
         log(`  Proxy Server: ${config.proxy_url}`);
@@ -1945,6 +2101,19 @@ async function main() {
         process.exit(result.completed ? 0 : 1);
     }
 
+    if (process.argv.includes('--test-browser-token-login')) {
+        log(`\n==================================================`);
+        log(`[🧪] โหมดทดสอบ Browser login และดึง access_token`);
+        log(`==================================================`);
+        if (!config.username || !config.password) {
+            log(`[RESULT] ไม่ได้กำหนด username/password ใน service_config.json`);
+            process.exit(1);
+        }
+        const ok = await loginWithBrowserForAccessToken(config.username, config.password);
+        log(`[RESULT] Browser token login: ${ok ? 'สำเร็จ' : 'ไม่สำเร็จ'}`);
+        process.exit(ok ? 0 : 1);
+    }
+
     // Check CLI argument for manual token setting
     const tokenArgIdx = process.argv.findIndex(arg => arg === '--set-token' || arg === '--token');
     if (tokenArgIdx !== -1 && process.argv[tokenArgIdx + 1]) {
@@ -1973,12 +2142,20 @@ async function main() {
 
     // 2. Auto login if no valid session token exists and credentials provided
     if (!primaryLoginSuccess && config.username && config.password) {
-        log(`[*] พบข้อมูลล็อกอินในค่าตั้งค่า กำลังเชื่อมต่อเข้า HOF...`);
-        primaryLoginSuccess = await loginWithCredentials(config.username, config.password);
+        if (config.browser_token_login_enabled !== false) {
+            log(`[*] พบข้อมูลล็อกอินในค่าตั้งค่า กำลัง login ผ่าน Browser เพื่อดึง access_token...`);
+            primaryLoginSuccess = await loginWithBrowserForAccessToken(config.username, config.password);
+        }
+
+        if (!primaryLoginSuccess) {
+            log(`[*] กำลังใช้ OAuth PKCE login เป็น fallback...`);
+            primaryLoginSuccess = await loginWithCredentials(config.username, config.password);
+        }
+
         if (primaryLoginSuccess) {
             log(`[+] เชื่อมต่อบัญชีผู้ใช้ HOF สำเร็จ! (${config.username}) ระบบจะทำการเคลมโค้ดอัตโนมัติ`);
         } else {
-            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้เนื่องจากติด Cloudflare Security Verification`);
+            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้ทั้ง Browser login และ OAuth PKCE`);
             log(`[💡] คำแนะนำ: กรุณาล็อกอินผ่านเบราว์เซอร์ แล้วนำ Bearer Token มาตั้งค่าด้วยคำสั่ง:`);
             log(`     node index.js --set-token <YOUR_BEARER_TOKEN>`);
             await notifyTokenExpired();

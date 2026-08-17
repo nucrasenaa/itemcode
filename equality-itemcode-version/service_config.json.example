@@ -1,11 +1,21 @@
 {
+  // แหล่งวิดีโอ/ไลฟ์ที่ระบบจะดึงภาพไปสแกนหา itemcode
   "youtube_url": "https://www.youtube.com/@thehof.talesrunner",
+
+  // Telegram: ใช้แจ้งเตือนเมื่อพบ code และแจ้งผลการเคลมผ่าน Browser
+  // ปล่อยค่าว่างได้ ระบบจะสแกนและทำงานต่อโดยไม่ส่ง Telegram
   "telegram_token": "",
   "telegram_chat_id": "",
   "telegram_enabled": false,
+
+  // ความถี่ในการสแกนภาพ (วินาที)
   "scan_interval": 10.0,
+
+  // รูปแบบ code ที่ OCR จะค้นหา
   "regex_pattern": "\\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{8,24}\\b",
   "history_file": "ocr_history.json",
+
+  // ตำแหน่งโปรแกรมภายนอก แยกตามระบบปฏิบัติการ
   "ytdl_path_mac": "/opt/homebrew/bin/yt-dlp",
   "ytdl_path_win": "%LOCALAPPDATA%\\Programs\\Python\\Python311\\Scripts\\yt-dlp.exe",
   "ytdl_path_linux": "yt-dlp",
@@ -15,14 +25,34 @@
   "ocr_helper_path_mac": "./ocr_helper",
   "ocr_helper_path_win": "%USERPROFILE%\\Documents\\equality-itemcode-version\\ocr_helper.ps1",
   "ocr_helper_path_linux": "tesseract",
+
+  // บัญชีหลัก: ใช้ login ผ่าน Browser เพื่อรับ access_token
+  // และใช้ access_token นี้สำหรับ login/check serial กับ API
   "username": "YOUR_HOF_USERNAME",
   "password": "YOUR_HOF_PASSWORD",
+
+  // บัญชีรอง: ใช้เปิดหน้า itemcode ผ่าน Browser เพื่อกรอกและกดใช้ itemcode
+  // ไม่ใช่บัญชีที่ใช้ check serial ใน API
   "username2": "YOUR_SECONDARY_HOF_USERNAME",
   "password2": "YOUR_SECONDARY_HOF_PASSWORD",
+
+  // เปิด/ปิด flow ใช้ itemcode ผ่าน Browser หลังพบ code และแจ้งเตือนแล้ว
   "browser_redeem_enabled": true,
+  // true = ทำงานเบื้องหลัง, false = เปิดหน้าต่าง Browser ให้เห็น
   "browser_redeem_headless": true,
+
+  // เปิด/ปิดการ login บัญชีหลักผ่าน Browser เพื่อดึง access_token อัตโนมัติ
+  "browser_token_login_enabled": true,
+  // true = login แบบเบื้องหลัง, false = เปิดหน้าต่าง Browser ให้เห็น
+  "browser_token_login_headless": true,
+
+  // game_id ที่ใช้กับ API ของ TalesRunner
   "game_id": "ece25107-ec4f-4c83-9f2b-38afd0e77cc2",
+
+  // Proxy แบบ HTTP/HTTPS; ปล่อยว่างถ้าไม่ใช้
   "proxy_url": "",
+
+  // cookie ของ yt-dlp (ไม่บังคับ; ใช้เมื่อไลฟ์ต้อง login)
   "ytdl_cookies_from_browser": "",
   "ytdl_cookies_file": ""
 }

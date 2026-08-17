@@ -22,8 +22,13 @@ const TURNSTILE_WRAPPER_SELECTOR =
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function parseConfigJson(text) {
+  // รองรับ comment แบบบรรทัดเดียวใน service_config.json
+  return JSON.parse(text.replace(/^\s*\/\/.*$/gm, ""));
+}
+
 async function loadCredentials() {
-  const config = JSON.parse(await fs.readFile(CONFIG_FILE, "utf8"));
+  const config = parseConfigJson(await fs.readFile(CONFIG_FILE, "utf8"));
   const usernameKey = USE_SECONDARY ? "username2" : "username";
   const passwordKey = USE_SECONDARY ? "password2" : "password";
   const username = String(config[usernameKey] ?? "").trim();
