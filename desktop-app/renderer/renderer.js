@@ -2,6 +2,7 @@ const api = window.itemcodeDesktop;
 const elements = {
     requirementsList: document.getElementById('requirementsList'),
     requirementSummary: document.getElementById('requirementSummary'),
+    repairRequirementPaths: document.getElementById('repairRequirementPaths'),
     refreshRequirements: document.getElementById('refreshRequirements'),
     workspaceCard: document.getElementById('workspaceCard'),
     itemcodeAccountsList: document.getElementById('itemcodeAccountsList'),
@@ -334,6 +335,23 @@ async function refreshRequirements() {
     }
 }
 
+async function repairRequirementPaths() {
+    elements.repairRequirementPaths.disabled = true;
+    elements.repairRequirementPaths.textContent = 'กำลังค้นหา...';
+    try {
+        const result = await api.repairRequirementPaths();
+        if (!result.ok) throw new Error(result.message || 'ค้นหา Path ไม่สำเร็จ');
+        requirements = result.requirements || [];
+        renderRequirements();
+        showToast(result.changed ? 'ค้นหาและบันทึก Path ใหม่แล้ว' : 'ตรวจพบ Path ปัจจุบันแล้ว');
+    } catch (error) {
+        showToast(error.message || 'ค้นหา Path ไม่สำเร็จ', true);
+    } finally {
+        elements.repairRequirementPaths.disabled = false;
+        elements.repairRequirementPaths.textContent = 'ค้นหา Path ใหม่';
+    }
+}
+
 function statusText(event) {
     const attempt = event.attempt ? ` ${event.attempt}/${event.attemptTotal || 3}` : '';
     const labels = {
@@ -551,6 +569,7 @@ function closeItemcodeModal() {
 }
 
 elements.refreshRequirements.addEventListener('click', refreshRequirements);
+elements.repairRequirementPaths.addEventListener('click', repairRequirementPaths);
 elements.startStop.addEventListener('click', toggleService);
 elements.testLogin.addEventListener('click', () => startTest('test-login'));
 elements.testItemcode.addEventListener('click', openItemcodeModal);
