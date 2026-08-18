@@ -30,6 +30,9 @@ let currentLoggedInUser = null;
 let isAutoLoginDisabled = false;
 let hasNotifiedTokenExpired = false;
 let lastPeriodicSleepTime = Date.now();
+const discordDestinationCache = new Map();
+const discordNotificationCache = new Map();
+const DISCORD_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
 // Logger
 function log(msg) {
@@ -1440,6 +1443,34 @@ async function sendTelegram(message, redeemResult = null) {
     return true;
 }
 
+async function getDiscordDestinationKey(url) {
+    if (discordDestinationCache.has(url)) {
+        return discordDestinationCache.get(url);
+    }
+
+    let destinationKey = `webhook:${crypto.createHash('sha256').update(url).digest('hex').slice(0, 16)}`;
+    try {
+        const response = await fetch(url, { method: 'GET' });
+        if (response.ok) {
+            const data = await response.json().catch(() => null);
+            if (data?.channel_id) {
+                destinationKey = `channel:${data.channel_id}`;
+            }
+        }
+    } catch (e) { }
+
+    discordDestinationCache.set(url, destinationKey);
+    return destinationKey;
+}
+
+function pruneDiscordNotificationCache(now = Date.now()) {
+    for (const [key, timestamp] of discordNotificationCache.entries()) {
+        if (now - timestamp > DISCORD_DEDUP_WINDOW_MS) {
+            discordNotificationCache.delete(key);
+        }
+    }
+}
+
 // Send Discord Webhook Notification
 async function sendDiscord(message, redeemResult = null) {
     const isEnabled = config.discord_enabled !== undefined ? !!config.discord_enabled : getDiscordWebhookUrls().length > 0;
@@ -1462,12 +1493,38 @@ async function sendDiscord(message, redeemResult = null) {
         return false;
     }
 
+    const now = Date.now();
+    pruneDiscordNotificationCache(now);
+    const destinationUrls = [];
+    const destinations = new Set();
+    for (const url of [...new Set(urls)]) {
+        const destinationKey = await getDiscordDestinationKey(url);
+        if (destinations.has(destinationKey)) {
+            log(`[i] Discord: ข้าม Webhook ซ้ำที่ชี้ไปยังปลายทางเดียวกัน`);
+            continue;
+        }
+        destinations.add(destinationKey);
+        const notificationKey = `${destinationKey}:${String(message || '').trim()}`;
+        if (discordNotificationCache.has(notificationKey)) {
+            log(`[i] Discord: ข้ามการแจ้งเตือนซ้ำของ ItemCode เดิมภายใน 10 นาที`);
+            continue;
+        }
+        // Reserve the key before POST so concurrent notification paths cannot
+        // deliver the same message twice to the same Discord destination.
+        discordNotificationCache.set(notificationKey, now);
+        destinationUrls.push({ url, notificationKey });
+    }
+
+    if (destinationUrls.length === 0) {
+        return false;
+    }
+
     const payload = {
         username: 'TalesRunner Bot',
         content: message
     };
     let sentAny = false;
-    for (const url of urls) {
+    for (const { url, notificationKey } of destinationUrls) {
         try {
             const response = await fetch(url, {
                 method: 'POST',
@@ -1480,9 +1537,11 @@ async function sendDiscord(message, redeemResult = null) {
             } else {
                 const text = await response.text();
                 log(`[-] Discord Webhook (${url.substring(0, 45)}...) returned failure (HTTP ${response.status}): ${text}`);
+                discordNotificationCache.delete(notificationKey);
             }
         } catch (error) {
             log(`[-] Discord network error for ${url.substring(0, 45)}...: ${error.message}`);
+            discordNotificationCache.delete(notificationKey);
         }
     }
     return sentAny;
