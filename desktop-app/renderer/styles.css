@@ -104,6 +104,8 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .log-status.available, .log-status.retry_success, .log-status.redeemed { background: rgba(112,225,194,.12); color: var(--accent); }
 .log-status.retry, .log-status.redeem_failed { background: rgba(245,197,109,.12); color: var(--warning); }
 .empty-log { padding: 38px 12px 44px; color: #6f86a3; text-align: center; font-size: 12px; }
+.debug-card .section-note { margin-bottom: 12px; }
+.debug-log { min-height: 170px; max-height: 420px; margin: 0; overflow: auto; border: 1px solid rgba(165,190,225,.12); border-radius: 11px; padding: 13px; background: #071321; color: #b7c8dc; font: 11px/1.55 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(1, 8, 17, .72); backdrop-filter: blur(8px); z-index: 10; }
 .modal-backdrop[hidden] { display: none; }
 .test-modal { width: min(420px, 100%); border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: #10243d; box-shadow: 0 24px 80px rgba(0,0,0,.4); }

@@ -161,6 +161,13 @@ function adjustPathsForOS() {
             }
         }
 
+    if (isWindows) {
+        const configuredOcr = expandPathVars(config.ocr_helper_path_win || config.ocr_helper_path || '');
+        config.ocr_helper_path = configuredOcr && fs.existsSync(configuredOcr)
+            ? configuredOcr
+            : path.join(__dirname, 'ocr_helper.ps1');
+    }
+
     if (config.ytdl_cookies_file) {
         config.ytdl_cookies_file = expandPathVars(config.ytdl_cookies_file);
     }
@@ -497,7 +504,7 @@ async function loginWithCredentials(username, password) {
 }
 
 // Log in through the browser, then reuse the access_token cookie for API checks.
-async function loginWithBrowserForAccessToken(username, password) {
+async function loginWithBrowserForAccessToken(username, password, options = {}) {
     username = username || config.username || "";
     password = password || config.password || "";
     if (!username || !password) return false;
@@ -627,7 +634,7 @@ async function loginWithBrowserForAccessToken(username, password) {
         accessToken = token;
         currentLoggedInUser = username;
         isAutoLoginDisabled = false;
-        saveSession(accessToken, username);
+        if (options.persistSession !== false) saveSession(accessToken, username);
         log(`[BROWSER-AUTH] ได้ access_token จาก Browser และบันทึก session แล้ว`);
         logTokenExpiration(accessToken);
         return true;
@@ -2136,8 +2143,12 @@ async function main() {
         let secondaryLoginSuccess = true;
         
         if (config.username2 && config.password2) {
-            log(`[*] กำลังทดสอบล็อกอินบัญชีสำรอง (${config.username2})...`);
-            secondaryLoginSuccess = await loginWithCredentials(config.username2, config.password2);
+            log(`[*] กำลังทดสอบล็อกอินบัญชีสำรองผ่าน Browser + Turnstile (${config.username2})...`);
+            secondaryLoginSuccess = await loginWithBrowserForAccessToken(
+                config.username2,
+                config.password2,
+                { persistSession: false }
+            );
             log(`[2] บัญชีสำรอง (${config.username2}): ${secondaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
         }
         log(`==================================================`);

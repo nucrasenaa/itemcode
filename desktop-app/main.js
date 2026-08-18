@@ -61,9 +61,27 @@ function ensureRuntimeDirectory() {
     if (!fs.existsSync(path.join(source, 'index.js'))) {
         throw new Error(`ไม่พบ service runtime ใน ${source}`);
     }
-    if (!fs.existsSync(path.join(target, 'index.js'))) {
-        fs.mkdirSync(target, { recursive: true });
-        fs.cpSync(source, target, { recursive: true });
+    fs.mkdirSync(target, { recursive: true });
+    // Refresh bundled service code on app upgrades while preserving the
+    // user's config and downloaded node_modules/browser dependencies.
+    for (const file of [
+        'index.js',
+        'package.json',
+        'package-lock.json',
+        'playwright_login.mjs',
+        'browser_login_test.mjs',
+        'ocr_helper.ps1',
+        'ocr_helper.swift',
+        'service_config.json.example'
+    ]) {
+        const from = path.join(source, file);
+        if (fs.existsSync(from)) fs.copyFileSync(from, path.join(target, file));
+    }
+    for (const file of ['ocr_helper', 'ocr_helper.swift']) {
+        const from = path.join(source, file);
+        if (fs.existsSync(from) && process.platform === 'darwin') {
+            fs.copyFileSync(from, path.join(target, file));
+        }
     }
     if (process.platform === 'darwin') {
         const ocrHelper = path.join(target, 'ocr_helper');
@@ -213,6 +231,7 @@ function pathCandidates(config, key, fallbackNames) {
 
 function browserCacheCandidates() {
     return [
+        path.join(appDataDir(), 'playwright-browsers'),
         path.join(os.homedir(), '.cache', 'ms-playwright'),
         path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright'),
         path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright-go'),
@@ -221,6 +240,16 @@ function browserCacheCandidates() {
             ? process.env.PLAYWRIGHT_BROWSERS_PATH
             : ''
     ].filter(Boolean);
+}
+
+function hasChromiumBrowser(cachePath) {
+    if (!cachePath || !fs.existsSync(cachePath)) return false;
+    try {
+        return fs.readdirSync(cachePath, { withFileTypes: true })
+            .some(entry => entry.isDirectory() && entry.name.toLowerCase().startsWith('chromium-'));
+    } catch (error) {
+        return false;
+    }
 }
 
 async function checkRequirements() {
@@ -246,7 +275,7 @@ async function checkRequirements() {
         ...browserCacheCandidates(),
         path.join(runtime, 'node_modules', '.local-browsers'),
         path.join(runtime, 'node_modules', 'playwright-core', '.local-browsers')
-    ].some(candidate => fs.existsSync(candidate));
+    ].some(hasChromiumBrowser);
     const browserReady = hasPlaywrightPackage && hasBrowserCache;
 
     return [
@@ -304,10 +333,15 @@ async function checkRequirements() {
 
 function runCommand(command, args, options = {}) {
     return new Promise((resolve, reject) => {
+        const cwd = options.cwd || process.cwd();
+        if (!command || !fs.existsSync(cwd)) {
+            return reject(new Error(`ไม่สามารถเริ่มคำสั่งได้: command=${command || '(ว่าง)'} cwd=${cwd}`));
+        }
         const child = spawn(command, args, {
-            cwd: options.cwd,
+            cwd,
             env: { ...process.env, ...(options.env || {}) },
             windowsHide: true,
+            shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
             stdio: ['ignore', 'pipe', 'pipe']
         });
         let output = '';
@@ -319,7 +353,7 @@ function runCommand(command, args, options = {}) {
             output += data.toString();
             if (options.onOutput) options.onOutput(data.toString());
         });
-        child.once('error', reject);
+        child.once('error', error => reject(new Error(`${error.message} (command=${command}, cwd=${cwd})`)));
         child.once('close', code => code === 0 ? resolve(output) : reject(new Error(output || `process exited with ${code}`)));
     });
 }
@@ -408,6 +442,9 @@ async function downloadRequirement(id) {
     if (id === 'browser') {
         const node = await findNodeCommand();
         if (!node) throw new Error('ต้องติดตั้ง Node.js ก่อนดาวน์โหลด Chromium');
+        if (!fs.existsSync(runtime)) fs.mkdirSync(runtime, { recursive: true });
+        const browserPath = path.join(appDataDir(), 'playwright-browsers');
+        fs.mkdirSync(browserPath, { recursive: true });
         let playwrightCli = path.join(runtime, 'node_modules', 'playwright', 'cli.js');
         if (!fs.existsSync(playwrightCli)) {
             const npmCommand = npmCommandForNode(node.command);
@@ -422,6 +459,7 @@ async function downloadRequirement(id) {
         }
         await runCommand(node.command, [playwrightCli, 'install', 'chromium'], {
             cwd: runtime,
+            env: { PLAYWRIGHT_BROWSERS_PATH: browserPath },
             onOutput: output => send('requirements:progress', { id, text: output.slice(-500) })
         });
         return { message: 'ดาวน์โหลด Playwright Chromium แล้ว' };
@@ -475,6 +513,11 @@ function parseServiceLine(line) {
 }
 
 function consumeServiceOutput(chunk, bufferName) {
+    send('service:log', {
+        stream: bufferName,
+        text: String(chunk || ''),
+        time: new Date().toISOString()
+    });
     if (bufferName === 'stdout') serviceOutputBuffer += chunk;
     else serviceErrorBuffer += chunk;
     let buffer = bufferName === 'stdout' ? serviceOutputBuffer : serviceErrorBuffer;
@@ -506,6 +549,11 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         browser_token_login_enabled: true,
         browser_token_login_headless: true
     });
+    if (process.platform === 'win32') {
+        // Do not keep the development-machine Documents path from the sample
+        // config when running the packaged service.
+        config.ocr_helper_path_win = path.join(runtime, 'ocr_helper.ps1');
+    }
     writeConfig(config);
 
     const requirements = await checkRequirements();
@@ -520,7 +568,12 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
     serviceMode = mode;
     serviceProcess = spawn(node.command || (process.platform === 'win32' ? 'node.exe' : 'node'), ['index.js', ...serviceArgs], {
         cwd: runtime,
-        env: { ...process.env, BROWSER_TOKEN_LOGIN_HEADLESS: 'true', BROWSER_REDEEM_HEADLESS: 'true' },
+        env: {
+            ...process.env,
+            PLAYWRIGHT_BROWSERS_PATH: path.join(appDataDir(), 'playwright-browsers'),
+            BROWSER_TOKEN_LOGIN_HEADLESS: 'true',
+            BROWSER_REDEEM_HEADLESS: 'true'
+        },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
     });

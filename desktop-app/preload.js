@@ -26,5 +26,10 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
         const listener = (_event, event) => callback(event);
         ipcRenderer.on('service:itemcode', listener);
         return () => ipcRenderer.removeListener('service:itemcode', listener);
+    },
+    onServiceLog: (callback) => {
+        const listener = (_event, entry) => callback(entry);
+        ipcRenderer.on('service:log', listener);
+        return () => ipcRenderer.removeListener('service:log', listener);
     }
 });

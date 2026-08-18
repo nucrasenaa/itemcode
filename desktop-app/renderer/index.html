@@ -114,7 +114,7 @@
                     <label class="log-filter-label" for="logFilter">แสดง</label>
                     <select class="log-filter" id="logFilter">
                         <option value="all">ทั้งหมด</option>
-                        <option value="success">เฉพาะที่สำเร็จ</option>
+                        <option value="success">เฉพาะเคลมสำเร็จผ่าน Browser</option>
                     </select>
                     <span class="log-count" id="logCount">0 รายการ</span>
                 </div>
@@ -127,6 +127,23 @@
             </div>
             <div class="log-list" id="logList">
                 <div class="empty-log" id="emptyLog">ยังไม่มี ItemCode ที่ตรวจพบ</div>
+            </div>
+        </section>
+
+        <section class="card debug-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">รายละเอียดเชิงเทคนิค</p>
+                    <h2>Service Debug Log</h2>
+                </div>
+                <div class="heading-actions">
+                    <button class="collapse-toggle" type="button" data-target="debugContent" aria-expanded="true">ย่อ</button>
+                    <button class="button button-ghost" id="clearDebugLog" type="button">ล้าง Log</button>
+                </div>
+            </div>
+            <div class="collapsible-content" id="debugContent">
+                <p class="section-note">แสดงข้อความจาก stdout/stderr ของ service รวมถึงสาเหตุที่ Test Login จบด้วย code 1</p>
+                <pre class="debug-log" id="debugLog" aria-live="polite">ยังไม่มีข้อความจาก service</pre>
             </div>
         </section>
 

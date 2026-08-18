@@ -19,6 +19,8 @@ const elements = {
     emptyLog: document.getElementById('emptyLog'),
     logCount: document.getElementById('logCount'),
     logFilter: document.getElementById('logFilter'),
+    debugLog: document.getElementById('debugLog'),
+    clearDebugLog: document.getElementById('clearDebugLog'),
     toast: document.getElementById('toast')
 };
 
@@ -26,6 +28,7 @@ let requirements = [];
 let running = false;
 let eventCount = 0;
 let toastTimer = null;
+let debugLogStarted = false;
 
 function showToast(message, error = false) {
     elements.toast.textContent = message;
@@ -166,7 +169,9 @@ function statusText(event) {
 }
 
 function isSuccessfulEvent(status) {
-    return ['available', 'redeemed', 'retry_success'].includes(status);
+    // Only the final Browser redemption event belongs in this filter.
+    // "available" and "retry_success" are scan/retry states, not completed claims.
+    return status === 'redeemed';
 }
 
 function applyLogFilter() {
@@ -180,7 +185,7 @@ function applyLogFilter() {
     }
     elements.emptyLog.hidden = visible > 0;
     elements.emptyLog.textContent = onlySuccess && rows.length > 0
-        ? 'ยังไม่มี ItemCode ที่สำเร็จ'
+        ? 'ยังไม่มีการเคลมผ่าน Browser สำเร็จ'
         : 'ยังไม่มี ItemCode ที่ตรวจพบ';
     elements.logCount.textContent = onlySuccess
         ? `${visible}/${eventCount} รายการ`
@@ -216,6 +221,20 @@ function addItemcodeEvent(event) {
         rows[rows.length - 1]?.remove();
     }
     applyLogFilter();
+}
+
+function addServiceLog(entry) {
+    if (!entry?.text) return;
+    if (!debugLogStarted) {
+        elements.debugLog.textContent = '';
+        debugLogStarted = true;
+    }
+    const prefix = entry.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+    elements.debugLog.textContent += `${prefix}${entry.text}`;
+    if (!elements.debugLog.textContent.endsWith('\n')) elements.debugLog.textContent += '\n';
+    const lines = elements.debugLog.textContent.split('\n');
+    if (lines.length > 1000) elements.debugLog.textContent = lines.slice(-1000).join('\n');
+    elements.debugLog.scrollTop = elements.debugLog.scrollHeight;
 }
 
 async function toggleService() {
@@ -321,6 +340,10 @@ elements.testLogin.addEventListener('click', () => startTest('test-login'));
 elements.testItemcode.addEventListener('click', openItemcodeModal);
 elements.testTelegram.addEventListener('click', runTelegramTest);
 elements.logFilter.addEventListener('change', applyLogFilter);
+elements.clearDebugLog.addEventListener('click', () => {
+    elements.debugLog.textContent = 'ยังไม่มีข้อความจาก service';
+    debugLogStarted = false;
+});
 elements.cancelItemcode.addEventListener('click', closeItemcodeModal);
 for (const button of document.querySelectorAll('.collapse-toggle')) {
     button.addEventListener('click', () => toggleSection(button));
@@ -357,6 +380,7 @@ api.onServiceState(state => {
     }
 });
 api.onItemcodeEvent(addItemcodeEvent);
+api.onServiceLog(addServiceLog);
 api.onRequirementsUpdate(next => {
     requirements = next;
     renderRequirements();
