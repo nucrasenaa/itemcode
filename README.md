@@ -39,6 +39,21 @@ bash equality-itemcode-version/install.sh
 * **Windows:** รองรับ Windows 10/11 (ใช้ WinRT OCR)
 * จำเป็นต้องมี `yt-dlp` และ `FFmpeg` ติดตั้งในเครื่อง (มีมาให้ในตัวช่วยติดตั้งภายในแต่ละโฟลเดอร์)
 
+## 🖥️ Desktop Application สำหรับ Windows / macOS
+
+มีหน้าจอ Electron สำหรับตรวจสอบ requirement, กรอกบัญชี 4 ช่อง และควบคุม service เดิม:
+
+```bash
+cd desktop-app
+npm install
+npm start
+```
+
+เมื่อเปิดครั้งแรกให้กด `Download` ในรายการที่ยังไม่พร้อม แล้วกด `ตรวจสอบอีกครั้ง` จากนั้นกรอก
+username/password สำหรับ Check Serial และ username/password สำหรับรับ ItemCode แล้วกด `Start`
+
+หน้าจอ log จะแสดงเฉพาะ ItemCode, รายละเอียด, สถานะรับไอเทม และ retry แต่ละรอบ
+
 ## 🎲 เครื่องมือสุ่มตามรูปแบบโค้ด
 
 `pattern_generator.py` สร้าง candidate แบบออฟไลน์จากรูปแบบใน `codes_only.txt`

@@ -37,6 +37,34 @@ function log(msg) {
     console.log(`[${timestamp}] ${msg}`);
 }
 
+// Machine-readable events consumed by the desktop application.
+function logItemcodeEvent(code, status, detail = '', attempt = null, attemptTotal = null) {
+    if (!code) return;
+    const event = {
+        code: String(code).trim().toUpperCase(),
+        status: String(status || 'info'),
+        detail: String(detail || '').trim()
+    };
+    if (attempt !== null && attempt !== undefined) event.attempt = Number(attempt);
+    if (attemptTotal !== null && attemptTotal !== undefined) event.attemptTotal = Number(attemptTotal);
+    console.log(`[ITEMCODE] ${JSON.stringify(event)}`);
+}
+
+function rewardDetailFromResult(result) {
+    try {
+        const reward = result?.checkData?.data?.reward;
+        const bundle = reward?.bundle;
+        if (bundle?.name) {
+            const items = (bundle.items || [])
+                .map(item => item?.item?.name || item?.name)
+                .filter(Boolean);
+            return items.length > 0 ? items.join(', ') : bundle.name;
+        }
+    } catch (e) { }
+    const data = result?.data || {};
+    return String(data.message || data.error || result?.message || '').trim();
+}
+
 function logTokenExpiration(token) {
     if (!token) return;
     try {
@@ -1215,6 +1243,7 @@ async function runBrowserRedeemAfterNotification(serial) {
     let result = null;
     for (let attempt = 1; attempt <= BROWSER_REDEEM_MAX_ATTEMPTS; attempt++) {
         log(`[BROWSER] เริ่มเคลมผ่าน Browser ครั้งที่ ${attempt}/${BROWSER_REDEEM_MAX_ATTEMPTS}`);
+        logItemcodeEvent(serial, 'retry', 'กำลังลองใช้ itemcode ผ่าน Browser', attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
         const attemptResult = await redeemCodeWithBrowser(serial, config.username2, config.password2);
         result = {
             ...attemptResult,
@@ -1222,7 +1251,10 @@ async function runBrowserRedeemAfterNotification(serial) {
             browser_max_attempts: BROWSER_REDEEM_MAX_ATTEMPTS
         };
 
-        if (result.success) break;
+        if (result.success) {
+            logItemcodeEvent(serial, 'redeemed', 'ใช้ itemcode ผ่าน Browser สำเร็จ', attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
+            break;
+        }
 
         if (attempt < BROWSER_REDEEM_MAX_ATTEMPTS) {
             log(`[BROWSER] ครั้งที่ ${attempt} ไม่สำเร็จ จะลองใหม่ใน ${BROWSER_REDEEM_RETRY_DELAY_MS / 1000} วินาที`);
@@ -1610,17 +1642,24 @@ async function processScan(directUrl) {
                     const msgStr = String(msg).toLowerCase();
                     const isWaitError = msgStr.includes("please wait") || msgStr.includes("captcha token field is required") || msgStr.includes("captcha type is present");
 
+                    if (checkSuccess) {
+                        logItemcodeEvent(varCode, 'available', rewardDetailFromResult(redeemResult) || 'check serial ผ่าน');
+                    }
+
                     const shouldNotify = checkSuccess || isWaitError;
 
                     if (successRes) {
                         log(`[🎉] เคลมโค้ด ${varCode} สำเร็จ!`);
+                        logItemcodeEvent(varCode, 'redeemed', rewardDetailFromResult(redeemResult) || 'ใช้ itemcode สำเร็จ');
                     } else {
                         log(`[❌] เคลมโค้ด ${varCode} ล้มเหลว: ${msg}`);
+                        logItemcodeEvent(varCode, 'redeem_failed', msg);
                     }
 
                     const isWaitOnly = msgStr.includes("please wait") || msgStr.includes("captcha token field is required") || msgStr.includes("captcha type is present");
                     if (isWaitOnly) {
                         log(`[!] Node: ตรวจพบข้อความ Please wait/Captcha: "${msg}". ส่งแจ้งเตือนด่วน...`);
+                        logItemcodeEvent(varCode, 'retry', msg);
                         let sentTele = await sendTelegram(varCode, redeemResult);
                         if (sentTele) {
                             logNotifiedCode(varCode);
@@ -1654,6 +1693,7 @@ async function processScan(directUrl) {
 
                         for (let attempt = 1; attempt <= 3; attempt++) {
                             log(`[*] Node: กำลังนอนรอ ${waitSeconds} วินาทีก่อนลองใหม่ (Attempt ${attempt}/3)...`);
+                            logItemcodeEvent(varCode, 'retry', `รอ ${waitSeconds} วินาทีก่อนลองใหม่`, attempt, 3);
                             await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
 
                             log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (Attempt ${attempt}/3)...`);
@@ -1668,6 +1708,7 @@ async function processScan(directUrl) {
 
                             if (retryCheckSuccess) {
                                 log(`[🎉] Node: ลองใหม่สำเร็จในรอบที่ ${attempt}!`);
+                                logItemcodeEvent(varCode, 'retry_success', rewardDetailFromResult(retryResult) || 'check serial สำเร็จ', attempt, 3);
                                 redeemResult = retryResult;
                                 retrySuccess = true;
                                 break;
@@ -2008,6 +2049,11 @@ async function main() {
         }
 
         const result = await redeemCodeWithBrowser(testCode, config.username2, config.password2);
+        logItemcodeEvent(
+            testCode,
+            result.success ? 'redeemed' : 'redeem_failed',
+            result.message || result.stage || (result.success ? 'ใช้ itemcode ผ่าน Browser สำเร็จ' : 'ใช้ itemcode ไม่สำเร็จ')
+        );
         log(`[RESULT] ${JSON.stringify({
             completed: result.completed,
             success: result.success,
@@ -2087,14 +2133,15 @@ async function main() {
         log(`\n==================================================`);
         log(`[🧪] โหมดทดสอบการล็อกอิน (--test-login)`);
         log(`[1] บัญชีหลัก (${config.username || 'ไม่ได้ระบุ'}): ${primaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว (ติด Cloudflare Verification)'}`);
+        let secondaryLoginSuccess = true;
         
         if (config.username2 && config.password2) {
             log(`[*] กำลังทดสอบล็อกอินบัญชีสำรอง (${config.username2})...`);
-            const secSuccess = await loginWithCredentials(config.username2, config.password2);
-            log(`[2] บัญชีสำรอง (${config.username2}): ${secSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
+            secondaryLoginSuccess = await loginWithCredentials(config.username2, config.password2);
+            log(`[2] บัญชีสำรอง (${config.username2}): ${secondaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
         }
         log(`==================================================`);
-        process.exit(primaryLoginSuccess ? 0 : 1);
+        process.exit(primaryLoginSuccess && secondaryLoginSuccess ? 0 : 1);
     }
 
     const redeemArgIdx = process.argv.findIndex(arg => arg === '--redeem' || arg === '--check');

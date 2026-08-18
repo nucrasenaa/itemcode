@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Equality ItemCode Watcher</title>
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+    <main class="shell">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">EQUALITY ITEMCODE WATCHER</p>
+                <h1>ตัวจัดการสแกน ItemCode</h1>
+                <p class="subtitle">ตรวจสอบเครื่องมือก่อนเริ่มงาน และติดตามสถานะการรับไอเทมแบบเรียลไทม์</p>
+            </div>
+            <div class="run-state" id="runState" data-running="false">
+                <span class="state-dot"></span>
+                <span id="runStateText">หยุดทำงาน</span>
+            </div>
+        </header>
+
+        <section class="card requirements-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">ขั้นตอนที่ 1</p>
+                    <h2>ตรวจสอบ Requirement</h2>
+                </div>
+                <div class="heading-actions">
+                    <button class="collapse-toggle" type="button" data-target="requirementsContent" aria-expanded="true">ย่อ</button>
+                    <button class="button button-ghost" id="refreshRequirements" type="button">ตรวจสอบอีกครั้ง</button>
+                </div>
+            </div>
+            <div class="collapsible-content" id="requirementsContent">
+                <p class="section-note">เปิดครั้งแรกระบบจะตรวจหาเครื่องมือที่จำเป็น หากยังไม่มีให้กด Download ที่รายการนั้น</p>
+                <div class="requirements-list" id="requirementsList" aria-live="polite"></div>
+                <div class="requirement-summary" id="requirementSummary">กำลังตรวจสอบ...</div>
+            </div>
+        </section>
+
+        <section class="card workspace-card" id="workspaceCard">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">ขั้นตอนที่ 2</p>
+                    <h2>ข้อมูลบัญชี</h2>
+                </div>
+                <div class="heading-actions">
+                    <button class="collapse-toggle" type="button" data-target="accountContent" aria-expanded="true">ย่อ</button>
+                    <span class="config-status" id="configStatus">ยังไม่ได้บันทึก</span>
+                </div>
+            </div>
+            <div class="collapsible-content" id="accountContent">
+              <div class="fields-grid">
+                <label class="field">
+                    <span>Username สำหรับ Check Serial</span>
+                    <input id="username" autocomplete="username" type="text" placeholder="กรอก username" />
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input id="password" autocomplete="current-password" type="password" placeholder="กรอก password" />
+                </label>
+                <label class="field">
+                    <span>Username สำหรับรับ ItemCode</span>
+                    <input id="username2" autocomplete="username" type="text" placeholder="กรอก username" />
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input id="password2" autocomplete="current-password" type="password" placeholder="กรอก password" />
+                </label>
+              </div>
+              <div class="telegram-box">
+                <div class="telegram-heading">
+                    <div>
+                        <span class="telegram-title">Telegram Notification</span>
+                        <span class="telegram-note">ตั้งค่าเพื่อรับแจ้งเตือน ItemCode และผลการรับไอเทม</span>
+                    </div>
+                    <label class="switch-label">
+                        <input id="telegramEnabled" type="checkbox" />
+                        <span class="switch"></span>
+                        <span>เปิดใช้งาน</span>
+                    </label>
+                </div>
+                <div class="fields-grid telegram-fields">
+                    <label class="field">
+                        <span>Telegram Bot Token</span>
+                        <input id="telegramToken" autocomplete="off" type="password" placeholder="กรอก Bot Token" />
+                    </label>
+                    <label class="field">
+                        <span>Telegram Chat ID</span>
+                        <input id="telegramChatId" autocomplete="off" type="text" placeholder="กรอก Chat ID" />
+                    </label>
+                </div>
+              </div>
+              <div class="actions-row">
+                <p class="small-note">การกด Start จะบันทึกข้อมูลลงเครื่องนี้ และเปิด service เดิมในโหมดเบื้องหลัง</p>
+                <div class="action-buttons">
+                    <button class="button button-ghost" id="testLogin" type="button">Test Login</button>
+                    <button class="button button-ghost" id="testItemcode" type="button">Test ItemCode</button>
+                    <button class="button button-ghost" id="testTelegram" type="button">Test Telegram</button>
+                    <button class="button button-primary start-button" id="startStop" type="button">Start</button>
+                </div>
+              </div>
+            </div>
+        </section>
+
+        <section class="card log-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">สถานะการทำงาน</p>
+                    <h2>ItemCode Log</h2>
+                </div>
+                <div class="log-tools">
+                    <label class="log-filter-label" for="logFilter">แสดง</label>
+                    <select class="log-filter" id="logFilter">
+                        <option value="all">ทั้งหมด</option>
+                        <option value="success">เฉพาะที่สำเร็จ</option>
+                    </select>
+                    <span class="log-count" id="logCount">0 รายการ</span>
+                </div>
+            </div>
+            <div class="log-header">
+                <span>เวลา</span>
+                <span>ItemCode</span>
+                <span>รายละเอียด</span>
+                <span>สถานะ</span>
+            </div>
+            <div class="log-list" id="logList">
+                <div class="empty-log" id="emptyLog">ยังไม่มี ItemCode ที่ตรวจพบ</div>
+            </div>
+        </section>
+
+        <div class="modal-backdrop" id="itemcodeModal" hidden>
+            <form class="test-modal" id="itemcodeForm">
+                <p class="section-kicker">ทดสอบการรับไอเทม</p>
+                <h2>Test ItemCode</h2>
+                <p class="section-note">ระบบจะเปิด flow Browser ด้วยบัญชีสำหรับรับ ItemCode</p>
+                <label class="field">
+                    <span>ItemCode</span>
+                    <input id="testItemcodeValue" type="text" autocomplete="off" placeholder="เช่น KEXEDP8BSF8P" />
+                </label>
+                <div class="modal-actions">
+                    <button class="button button-ghost" id="cancelItemcode" type="button">ยกเลิก</button>
+                    <button class="button button-primary" type="submit">เริ่มทดสอบ</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="./renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+{
+  "name": "itemcode-desktop",
+  "version": "0.1.0",
+  "description": "Cross-platform desktop UI for equality-itemcode-version",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node --check renderer/renderer.js",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.itemcode.desktop",
+    "productName": "Equality ItemCode Watcher",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../equality-itemcode-version",
+        "to": "equality-itemcode-version",
+        "filter": [
+          "index.js",
+          "package.json",
+          "package-lock.json",
+          "playwright_login.mjs",
+          "browser_login_test.mjs",
+          "ocr_helper",
+          "ocr_helper.ps1",
+          "ocr_helper.swift",
+          "service_config.json.example",
+          "node_modules/**/*"
+        ]
+      },
+      {
+        "from": "../equality-itemcode-version/node_modules",
+        "to": "equality-itemcode-version/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "allowScripts": {
+    "electron@38.8.6": true
+  }
+}

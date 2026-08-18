@@ -35,6 +35,41 @@ function log(msg) {
     console.log(`[${timestamp}] ${msg}`);
 }
 
+// Machine-readable events consumed by the desktop application. The normal
+// human-readable log remains unchanged for CLI users.
+function logItemcodeEvent(code, status, detail = '', attempt = null, attemptTotal = null) {
+    if (!code) return;
+    const event = {
+        code: String(code).trim().toUpperCase(),
+        status: String(status || 'info'),
+        detail: String(detail || '').trim()
+    };
+    if (attempt !== null && attempt !== undefined) {
+        event.attempt = Number(attempt);
+    }
+    if (attemptTotal !== null && attemptTotal !== undefined) {
+        event.attemptTotal = Number(attemptTotal);
+    }
+    console.log(`[ITEMCODE] ${JSON.stringify(event)}`);
+}
+
+function rewardDetailFromResult(result) {
+    try {
+        const reward = result?.checkData?.data?.reward;
+        const bundle = reward?.bundle;
+        if (bundle?.name) {
+            const items = (bundle.items || [])
+                .map(item => item?.item?.name || item?.name)
+                .filter(Boolean);
+            return items.length > 0 ? items.join(', ') : bundle.name;
+        }
+    } catch (e) {
+        // Keep the event path best-effort; the original flow handles errors.
+    }
+    const data = result?.data || {};
+    return String(data.message || data.error || result?.message || '').trim();
+}
+
 function logTokenExpiration(token) {
     if (!token) return;
     try {
@@ -1268,6 +1303,7 @@ async function runBrowserRedeemWithRetries(serial, maxAttempts = 5) {
 
         if (attempt < maxAttempts) {
             log(`[BROWSER] รอบที่ ${attempt} ไม่สำเร็จ รอ 10 วินาทีก่อนลองใหม่...`);
+            logItemcodeEvent(serial, 'retry', 'ใช้ itemcode ผ่าน Browser ไม่สำเร็จ กำลังลองใหม่', attempt, maxAttempts);
             await sleep(10000);
         }
     }
@@ -1411,6 +1447,7 @@ async function retryCheckSerialAndNotify(serial, initialMessage) {
 
     for (let attempt = 1; attempt <= 3; attempt++) {
         log(`[*] Node: รอ ${waitSeconds} วินาทีก่อน check serial ซ้ำ (รอบที่ ${attempt}/3): ${serial}`);
+        logItemcodeEvent(serial, 'retry', `รอ ${waitSeconds} วินาทีก่อน check serial ซ้ำ`, attempt, 3);
         await sleep(waitSeconds * 1000);
 
         log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (check serial รอบที่ ${attempt}/3)...`);
@@ -1425,6 +1462,7 @@ async function retryCheckSerialAndNotify(serial, initialMessage) {
 
         if (retryCheckSuccess) {
             log(`[🎉] Node: check serial ซ้ำสำเร็จในรอบที่ ${attempt}: ${serial}`);
+            logItemcodeEvent(serial, 'retry_success', rewardDetailFromResult(lastResult) || 'check serial สำเร็จ', attempt, 3);
 
             let messageToSend = 'ไม่ทราบรางวัล';
             if (lastResult.checkData) {
@@ -1739,17 +1777,24 @@ async function processScan(directUrl) {
                     const msgStr = String(msg).toLowerCase();
                     const isWaitError = msgStr.includes("please wait") || msgStr.includes("captcha token field is required") || msgStr.includes("captcha type is present");
 
+                    if (checkSuccess) {
+                        logItemcodeEvent(varCode, 'available', rewardDetailFromResult(redeemResult) || 'check serial ผ่าน');
+                    }
+
                     const shouldNotify = checkSuccess || isWaitError;
 
                     if (successRes) {
                         log(`[🎉] เคลมโค้ด ${varCode} สำเร็จ!`);
+                        logItemcodeEvent(varCode, 'redeemed', rewardDetailFromResult(redeemResult) || 'ใช้ itemcode สำเร็จ');
                     } else {
                         log(`[❌] เคลมโค้ด ${varCode} ล้มเหลว: ${msg}`);
+                        logItemcodeEvent(varCode, 'redeem_failed', msg);
                     }
 
                     const isWaitOnly = msgStr.includes("please wait") || msgStr.includes("captcha token field is required") || msgStr.includes("captcha type is present");
                     if (isWaitOnly) {
                         log(`[!] Node: ตรวจพบข้อความ Please wait/Captcha: "${msg}". ส่งแจ้งเตือนด่วน...`);
+                        logItemcodeEvent(varCode, 'retry', msg);
                         let sentTele = await sendTelegram(varCode, redeemResult);
                         let sentDisc = await sendDiscord(varCode, redeemResult);
                         if (sentTele || sentDisc) {
