@@ -53,6 +53,59 @@ function stripJsonComments(text) {
     return text.replace(/^\s*\/\/.*$/gm, '');
 }
 
+function normalizeItemcodeAccounts(source = {}) {
+    const rawAccounts = Array.isArray(source.itemcodeAccounts)
+        ? source.itemcodeAccounts
+        : Array.isArray(source.itemcode_accounts)
+            ? source.itemcode_accounts
+            : [];
+    const accounts = rawAccounts
+        .map(account => ({
+            username: String(account?.username || '').trim(),
+            password: String(account?.password || '')
+        }))
+        .filter(account => account.username && account.password);
+
+    if (accounts.length === 0 && source.username2 && source.password2) {
+        accounts.push({
+            username: String(source.username2).trim(),
+            password: String(source.password2)
+        });
+    }
+    return accounts;
+}
+
+function applyItemcodeAccounts(config, source) {
+    const accounts = normalizeItemcodeAccounts(source);
+    config.itemcode_accounts = accounts;
+    // Keep the legacy fields in sync so older service configs remain usable.
+    config.username2 = accounts[0]?.username || '';
+    config.password2 = accounts[0]?.password || '';
+    return accounts;
+}
+
+function normalizeDiscordWebhooks(source = {}) {
+    const raw = Array.isArray(source.discordWebhookUrls)
+        ? source.discordWebhookUrls
+        : Array.isArray(source.discord_webhook_urls)
+            ? source.discord_webhook_urls
+            : Array.isArray(source.discord_webhook_url)
+                ? source.discord_webhook_url
+                : typeof source.discord_webhook_url === 'string'
+                    ? source.discord_webhook_url.split(',')
+                    : source.discordWebhookUrl
+                        ? [source.discordWebhookUrl]
+                        : [];
+    return raw.map(url => String(url || '').trim()).filter(Boolean);
+}
+
+function applyDiscordWebhooks(config, source) {
+    const urls = normalizeDiscordWebhooks(source);
+    config.discord_webhook_url = urls;
+    config.discord_webhook_urls = urls;
+    return urls;
+}
+
 function ensureRuntimeDirectory() {
     if (!app.isPackaged) return SERVICE_SOURCE_DIR;
 
@@ -106,8 +159,12 @@ function readConfig() {
                     youtube_url: '',
                     username: '',
                     password: '',
+                    itemcode_accounts: [],
                     username2: '',
                     password2: '',
+                    discord_webhook_url: [],
+                    discord_webhook_urls: [],
+                    discord_enabled: false,
                     browser_redeem_enabled: true,
                     browser_redeem_headless: true,
                     browser_token_login_enabled: true,
@@ -536,15 +593,17 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
     if (serviceProcess) return { running: true };
     const runtime = ensureRuntimeDirectory();
     const config = readConfig();
+    const itemcodeAccounts = normalizeItemcodeAccounts(settings);
+    applyItemcodeAccounts(config, { itemcodeAccounts });
+    const discordWebhookUrls = applyDiscordWebhooks(config, settings);
     Object.assign(config, {
         username: String(settings?.username || '').trim(),
         password: String(settings?.password || ''),
-        username2: String(settings?.username2 || '').trim(),
-        password2: String(settings?.password2 || ''),
         telegram_token: String(settings?.telegramToken || ''),
         telegram_chat_id: String(settings?.telegramChatId || '').trim(),
         telegram_enabled: Boolean(settings?.telegramEnabled),
-        browser_redeem_enabled: Boolean(settings?.username2 && settings?.password2),
+        discord_enabled: Boolean(settings?.discordEnabled) && discordWebhookUrls.length > 0,
+        browser_redeem_enabled: itemcodeAccounts.length > 0,
         browser_redeem_headless: true,
         browser_token_login_enabled: true,
         browser_token_login_headless: true
@@ -640,6 +699,41 @@ async function testTelegram(settings) {
     }
 }
 
+async function testDiscord(settings) {
+    const config = readConfig();
+    const urls = normalizeDiscordWebhooks(settings || config);
+    if (urls.length === 0) {
+        return { ok: false, message: 'กรุณาเพิ่ม Discord Webhook อย่างน้อย 1 รายการก่อนทดสอบ' };
+    }
+
+    const payload = {
+        username: 'TalesRunner Bot',
+        content: `✅ Equality ItemCode Watcher\nทดสอบ Discord สำเร็จ\nเวลา: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}`
+    };
+    let sentCount = 0;
+    const failures = [];
+    for (const url of urls) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (response.ok) {
+                sentCount += 1;
+            } else {
+                failures.push(`HTTP ${response.status}`);
+            }
+        } catch (error) {
+            failures.push(error.message);
+        }
+    }
+    if (sentCount > 0) {
+        return { ok: true, message: `ส่งข้อความทดสอบ Discord สำเร็จ ${sentCount}/${urls.length} webhook` };
+    }
+    return { ok: false, message: `ส่งข้อความ Discord ไม่สำเร็จ${failures[0] ? `: ${failures[0]}` : ''}` };
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 1120,
@@ -676,26 +770,31 @@ ipcMain.handle('requirements:help', async (_event, id) => {
 });
 ipcMain.handle('settings:load', () => {
     const config = readConfig();
+    const itemcodeAccounts = normalizeItemcodeAccounts(config);
+    const discordWebhookUrls = normalizeDiscordWebhooks(config);
     return {
         username: config.username || '',
         password: config.password || '',
-        username2: config.username2 || '',
-        password2: config.password2 || '',
+        itemcodeAccounts,
         telegramToken: config.telegram_token || '',
         telegramChatId: config.telegram_chat_id || '',
-        telegramEnabled: config.telegram_enabled !== false && Boolean(config.telegram_token && config.telegram_chat_id)
+        telegramEnabled: config.telegram_enabled !== false && Boolean(config.telegram_token && config.telegram_chat_id),
+        discordWebhookUrls,
+        discordEnabled: config.discord_enabled !== false && discordWebhookUrls.length > 0
     };
 });
 ipcMain.handle('settings:save', (_event, settings) => {
     const config = readConfig();
+    const itemcodeAccounts = normalizeItemcodeAccounts(settings);
+    applyItemcodeAccounts(config, { itemcodeAccounts });
+    const discordWebhookUrls = applyDiscordWebhooks(config, settings);
     Object.assign(config, {
         username: String(settings?.username || '').trim(),
         password: String(settings?.password || ''),
-        username2: String(settings?.username2 || '').trim(),
-        password2: String(settings?.password2 || ''),
         telegram_token: String(settings?.telegramToken || ''),
         telegram_chat_id: String(settings?.telegramChatId || '').trim(),
-        telegram_enabled: Boolean(settings?.telegramEnabled)
+        telegram_enabled: Boolean(settings?.telegramEnabled),
+        discord_enabled: Boolean(settings?.discordEnabled) && discordWebhookUrls.length > 0
     });
     writeConfig(config);
     return { ok: true };
@@ -708,6 +807,7 @@ ipcMain.handle('service:test-itemcode', (_event, payload) => {
     return startService(payload?.settings || {}, ['--test-browser-redeem', code], 'test-itemcode');
 });
 ipcMain.handle('telegram:test', (_event, settings) => testTelegram(settings));
+ipcMain.handle('discord:test', (_event, settings) => testDiscord(settings));
 ipcMain.handle('service:stop', () => stopService());
 ipcMain.handle('service:state', () => ({ running: Boolean(serviceProcess), mode: serviceMode }));
 

@@ -2,6 +2,12 @@
   // แหล่งวิดีโอ/ไลฟ์ที่ระบบจะดึงภาพไปสแกนหา itemcode
   "youtube_url": "https://www.youtube.com/@thehof.talesrunner",
 
+  // Discord: เพิ่ม Webhook ได้หลายรายการ ระบบจะส่งไปทุกรายการเมื่อเปิดใช้งาน
+  // ใช้เงื่อนไขเดียวกับ node_service และปล่อย array ว่างได้
+  "discord_webhook_url": [],
+  "discord_webhook_urls": [],
+  "discord_enabled": false,
+
   // Telegram: ใช้แจ้งเตือนเมื่อพบ code และแจ้งผลการเคลมผ่าน Browser
   // ปล่อยค่าว่างได้ ระบบจะสแกนและทำงานต่อโดยไม่ส่ง Telegram
   "telegram_token": "",
@@ -31,10 +37,22 @@
   "username": "YOUR_HOF_USERNAME",
   "password": "YOUR_HOF_PASSWORD",
 
-  // บัญชีรอง: ใช้เปิดหน้า itemcode ผ่าน Browser เพื่อกรอกและกดใช้ itemcode
+  // บัญชีรับ ItemCode: ระบบจะใช้ตามลำดับ 1 → 2 → 3 แล้ววนกลับบัญชีที่ 1
   // ไม่ใช่บัญชีที่ใช้ check serial ใน API
-  "username2": "YOUR_SECONDARY_HOF_USERNAME",
-  "password2": "YOUR_SECONDARY_HOF_PASSWORD",
+  "itemcode_accounts": [
+    {
+      "username": "YOUR_SECONDARY_HOF_USERNAME_1",
+      "password": "YOUR_SECONDARY_HOF_PASSWORD_1"
+    },
+    {
+      "username": "YOUR_SECONDARY_HOF_USERNAME_2",
+      "password": "YOUR_SECONDARY_HOF_PASSWORD_2"
+    }
+  ],
+
+  // ฟิลด์เดิม เก็บไว้เพื่อรองรับ config รุ่นเก่า โดยจะใช้เป็นบัญชีลำดับที่ 1
+  "username2": "",
+  "password2": "",
 
   // เปิด/ปิด flow ใช้ itemcode ผ่าน Browser หลังพบ code และแจ้งเตือนแล้ว
   "browser_redeem_enabled": true,

@@ -51,7 +51,7 @@
                 </div>
             </div>
             <div class="collapsible-content" id="accountContent">
-              <div class="fields-grid">
+              <div class="fields-grid primary-account-fields">
                 <label class="field">
                     <span>Username สำหรับ Check Serial</span>
                     <input id="username" autocomplete="username" type="text" placeholder="กรอก username" />
@@ -60,14 +60,16 @@
                     <span>Password</span>
                     <input id="password" autocomplete="current-password" type="password" placeholder="กรอก password" />
                 </label>
-                <label class="field">
-                    <span>Username สำหรับรับ ItemCode</span>
-                    <input id="username2" autocomplete="username" type="text" placeholder="กรอก username" />
-                </label>
-                <label class="field">
-                    <span>Password</span>
-                    <input id="password2" autocomplete="current-password" type="password" placeholder="กรอก password" />
-                </label>
+              </div>
+              <div class="itemcode-accounts-box">
+                <div class="telegram-heading">
+                    <div>
+                        <span class="telegram-title">บัญชีสำหรับรับ ItemCode</span>
+                        <span class="telegram-note">เพิ่มได้หลายบัญชี ระบบจะใช้ตามลำดับ: บัญชีที่ 1 → 2 → 3 แล้ววนกลับบัญชีที่ 1</span>
+                    </div>
+                    <button class="button button-ghost" id="addItemcodeAccount" type="button">+ เพิ่มบัญชี</button>
+                </div>
+                <div class="itemcode-account-list" id="itemcodeAccountsList"></div>
               </div>
               <div class="telegram-box">
                 <div class="telegram-heading">
@@ -92,12 +94,30 @@
                     </label>
                 </div>
               </div>
+              <div class="discord-box">
+                <div class="telegram-heading">
+                    <div>
+                        <span class="telegram-title">Discord Notification</span>
+                        <span class="telegram-note">เงื่อนไขการแจ้งเตือนเหมือน node_service และส่งไปทุก Webhook ที่เปิดใช้งาน</span>
+                    </div>
+                    <div class="notification-heading-actions">
+                        <label class="switch-label">
+                            <input id="discordEnabled" type="checkbox" />
+                            <span class="switch"></span>
+                            <span>เปิดใช้งาน</span>
+                        </label>
+                        <button class="button button-ghost" id="addDiscordWebhook" type="button">+ เพิ่ม Webhook</button>
+                    </div>
+                </div>
+                <div class="discord-webhook-list" id="discordWebhookList"></div>
+              </div>
               <div class="actions-row">
                 <p class="small-note">การกด Start จะบันทึกข้อมูลลงเครื่องนี้ และเปิด service เดิมในโหมดเบื้องหลัง</p>
                 <div class="action-buttons">
                     <button class="button button-ghost" id="testLogin" type="button">Test Login</button>
                     <button class="button button-ghost" id="testItemcode" type="button">Test ItemCode</button>
                     <button class="button button-ghost" id="testTelegram" type="button">Test Telegram</button>
+                    <button class="button button-ghost" id="testDiscord" type="button">Test Discord</button>
                     <button class="button button-primary start-button" id="startStop" type="button">Start</button>
                 </div>
               </div>

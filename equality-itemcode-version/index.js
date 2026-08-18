@@ -52,17 +52,31 @@ function logItemcodeEvent(code, status, detail = '', attempt = null, attemptTota
 
 function rewardDetailFromResult(result) {
     try {
-        const reward = result?.checkData?.data?.reward;
-        const bundle = reward?.bundle;
-        if (bundle?.name) {
-            const items = (bundle.items || [])
-                .map(item => item?.item?.name || item?.name)
-                .filter(Boolean);
-            return items.length > 0 ? items.join(', ') : bundle.name;
+        const rewardCandidates = [
+            result?.checkData?.data?.reward,
+            result?.checkData?.reward,
+            result?.data?.data?.reward,
+            result?.data?.reward
+        ];
+        for (const reward of rewardCandidates) {
+            const bundle = reward?.bundle;
+            if (bundle?.name) {
+                const items = (bundle.items || [])
+                    .map(item => item?.item?.name || item?.name)
+                    .filter(Boolean);
+                return items.length > 0 ? items.join(', ') : bundle.name;
+            }
+            if (reward?.name) return String(reward.name);
         }
     } catch (e) { }
     const data = result?.data || {};
     return String(data.message || data.error || result?.message || '').trim();
+}
+
+function formatItemcodeNotification(serial, result, fallback = 'ไม่ทราบรางวัล') {
+    const code = String(serial || '').trim().toUpperCase();
+    const detail = rewardDetailFromResult(result) || fallback;
+    return `${code}\n${detail}`;
 }
 
 function logTokenExpiration(token) {
@@ -184,6 +198,37 @@ function parseConfigJson(text) {
     return JSON.parse(text.replace(/^\s*\/\/.*$/gm, ''));
 }
 
+function getItemcodeAccounts() {
+    const rawAccounts = Array.isArray(config.itemcode_accounts) ? config.itemcode_accounts : [];
+    const accounts = rawAccounts
+        .map(account => ({
+            username: String(account?.username || '').trim(),
+            password: String(account?.password || '')
+        }))
+        .filter(account => account.username && account.password);
+
+    if (accounts.length === 0 && config.username2 && config.password2) {
+        accounts.push({
+            username: String(config.username2).trim(),
+            password: String(config.password2)
+        });
+    }
+    return accounts;
+}
+
+function getDiscordWebhookUrls() {
+    const source = Array.isArray(config.discord_webhook_urls)
+        ? config.discord_webhook_urls
+        : config.discord_webhook_url;
+    if (Array.isArray(source)) {
+        return source.map(url => String(url || '').trim()).filter(Boolean);
+    }
+    if (typeof source === 'string') {
+        return source.split(',').map(url => url.trim()).filter(Boolean);
+    }
+    return [];
+}
+
 function loadConfig() {
     const configPath = path.join(__dirname, 'service_config.json');
     try {
@@ -195,12 +240,23 @@ function loadConfig() {
             if (config.telegram_enabled === undefined) {
                 config.telegram_enabled = !!(config.telegram_token && config.telegram_chat_id);
             }
+            const discordWebhookUrls = getDiscordWebhookUrls();
+            config.discord_webhook_url = discordWebhookUrls;
+            config.discord_webhook_urls = discordWebhookUrls;
+            if (config.discord_enabled === undefined) {
+                config.discord_enabled = discordWebhookUrls.length > 0;
+            }
             if (!config.username) config.username = "";
             if (!config.password) config.password = "";
             if (!config.username2) config.username2 = "";
             if (!config.password2) config.password2 = "";
+            if (!Array.isArray(config.itemcode_accounts)) config.itemcode_accounts = [];
+            const itemcodeAccounts = getItemcodeAccounts();
+            config.itemcode_accounts = itemcodeAccounts;
+            config.username2 = itemcodeAccounts[0]?.username || "";
+            config.password2 = itemcodeAccounts[0]?.password || "";
             if (config.browser_redeem_enabled === undefined) {
-                config.browser_redeem_enabled = !!(config.username2 && config.password2);
+                config.browser_redeem_enabled = itemcodeAccounts.length > 0;
             }
             if (config.browser_redeem_headless === undefined) {
                 config.browser_redeem_headless = true;
@@ -223,6 +279,9 @@ function loadConfig() {
             telegram_token: "",
             telegram_chat_id: "",
             telegram_enabled: false,
+            discord_webhook_url: [],
+            discord_webhook_urls: [],
+            discord_enabled: false,
             scan_interval: 10.0,
             regex_pattern: "\\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{8,24}\\b",
             history_file: "ocr_history.json",
@@ -231,6 +290,7 @@ function loadConfig() {
             ocr_helper_path: "./ocr_helper",
             username: "",
             password: "",
+            itemcode_accounts: [],
             username2: "",
             password2: "",
             browser_redeem_enabled: false,
@@ -1020,12 +1080,13 @@ async function redeemCodeInner(serial, username = null, password = null) {
 // This keeps the CAPTCHA step in a real visible browser and submits through the
 // item-code page instead of sending an empty captcha_token to the API.
 async function redeemCodeWithBrowser(serial, username = null, password = null) {
-    const targetUsername = username || config.username2 || "";
-    const targetPassword = password || config.password2 || "";
+    const fallbackAccount = getItemcodeAccounts()[0] || {};
+    const targetUsername = username || fallbackAccount.username || "";
+    const targetPassword = password || fallbackAccount.password || "";
     const normalizedSerial = String(serial || "").trim().toUpperCase();
 
     if (!targetUsername || !targetPassword) {
-        return { completed: false, success: false, message: "ไม่ได้กำหนด username2/password2" };
+        return { completed: false, success: false, message: "ไม่ได้กำหนดบัญชีสำหรับรับ ItemCode" };
     }
     if (!normalizedSerial) {
         return { completed: false, success: false, message: "ไม่ได้กำหนด itemcode" };
@@ -1241,72 +1302,102 @@ async function redeemCodeWithBrowser(serial, username = null, password = null) {
 
 async function runBrowserRedeemAfterNotification(serial) {
     if (!config.browser_redeem_enabled) return null;
-    if (!config.username2 || !config.password2) {
-        log(`[BROWSER] ข้ามการเคลมผ่านหน้าเว็บ: ไม่มี username2/password2`);
+    const accounts = getItemcodeAccounts();
+    if (accounts.length === 0) {
+        log(`[BROWSER] ข้ามการเคลมผ่านหน้าเว็บ: ยังไม่มีบัญชีสำหรับรับ ItemCode`);
         return null;
     }
 
-    log(`[BROWSER] แจ้งเตือนเสร็จแล้ว กำลังเปิดหน้า itemcode ด้วยบัญชีสำรอง...`);
-    let result = null;
-    for (let attempt = 1; attempt <= BROWSER_REDEEM_MAX_ATTEMPTS; attempt++) {
-        log(`[BROWSER] เริ่มเคลมผ่าน Browser ครั้งที่ ${attempt}/${BROWSER_REDEEM_MAX_ATTEMPTS}`);
-        logItemcodeEvent(serial, 'retry', 'กำลังลองใช้ itemcode ผ่าน Browser', attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
-        const attemptResult = await redeemCodeWithBrowser(serial, config.username2, config.password2);
-        result = {
-            ...attemptResult,
-            browser_attempt: attempt,
-            browser_max_attempts: BROWSER_REDEEM_MAX_ATTEMPTS
-        };
+    const accountResults = [];
+    log(`[BROWSER] แจ้งเตือนเสร็จแล้ว กำลังเคลม itemcode ให้ครบ ${accounts.length} บัญชีตามลำดับ...`);
 
-        if (result.success) {
-            logItemcodeEvent(serial, 'redeemed', 'ใช้ itemcode ผ่าน Browser สำเร็จ', attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
-            break;
+    // Each discovered itemcode is redeemed by every configured account in order.
+    // The caller pauses OCR only after this function has finished all accounts.
+    for (let accountIndex = 0; accountIndex < accounts.length; accountIndex++) {
+        const account = accounts[accountIndex];
+        const accountOrder = accountIndex + 1;
+        const accountLabel = `บัญชีที่ ${accountOrder}/${accounts.length} (${account.username})`;
+        log(`[BROWSER] กำลังเปิดหน้า itemcode ด้วย${accountLabel}...`);
+
+        let result = null;
+        for (let attempt = 1; attempt <= BROWSER_REDEEM_MAX_ATTEMPTS; attempt++) {
+            log(`[BROWSER] เริ่มเคลมผ่าน Browser ด้วย${accountLabel} ครั้งที่ ${attempt}/${BROWSER_REDEEM_MAX_ATTEMPTS}`);
+            logItemcodeEvent(serial, 'retry', `กำลังลองใช้ itemcode ผ่าน Browser ด้วย${accountLabel}`, attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
+            const attemptResult = await redeemCodeWithBrowser(serial, account.username, account.password);
+            result = {
+                ...attemptResult,
+                browser_attempt: attempt,
+                browser_max_attempts: BROWSER_REDEEM_MAX_ATTEMPTS,
+                account_username: account.username,
+                account_order: accountOrder,
+                account_total: accounts.length
+            };
+
+            if (result.success) {
+                logItemcodeEvent(serial, 'redeemed', `ใช้ itemcode ผ่าน Browser สำเร็จด้วย${accountLabel}`, attempt, BROWSER_REDEEM_MAX_ATTEMPTS);
+                break;
+            }
+
+            if (attempt < BROWSER_REDEEM_MAX_ATTEMPTS) {
+                log(`[BROWSER] ${accountLabel} ครั้งที่ ${attempt} ไม่สำเร็จ จะลองใหม่ใน ${BROWSER_REDEEM_RETRY_DELAY_MS / 1000} วินาที`);
+                await new Promise(resolve => setTimeout(resolve, BROWSER_REDEEM_RETRY_DELAY_MS));
+            }
         }
 
-        if (attempt < BROWSER_REDEEM_MAX_ATTEMPTS) {
-            log(`[BROWSER] ครั้งที่ ${attempt} ไม่สำเร็จ จะลองใหม่ใน ${BROWSER_REDEEM_RETRY_DELAY_MS / 1000} วินาที`);
-            await new Promise(resolve => setTimeout(resolve, BROWSER_REDEEM_RETRY_DELAY_MS));
+        if (result.maintenance) {
+            log(`[BROWSER] ${accountLabel} หน้าเว็บตอบกลับว่าอยู่ระหว่างปิดปรับปรุงระบบ (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
+        } else if (result.success) {
+            log(`[BROWSER] ส่ง itemcode ผ่านหน้าเว็บสำเร็จด้วย${accountLabel}: ${serial} (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
+        } else {
+            log(`[BROWSER] ${accountLabel} flow ไม่สำเร็จหลังลอง ${result.browser_attempt}/${result.browser_max_attempts} ครั้ง (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
         }
+
+        const browserStatus = result.maintenance
+            ? 'ปิดปรับปรุงระบบ'
+            : result.success
+                ? 'เคลมสำเร็จ'
+                : 'เคลมไม่สำเร็จ';
+        const browserDetail = result.maintenance
+            ? 'ปิดปรับปรุงระบบชั่วคราว กรุณาลองใหม่อีกครั้งในภายหลัง'
+            : result.success
+                ? `ส่ง itemcode ผ่านหน้าเว็บเรียบร้อยแล้วด้วย${accountLabel}`
+                : result.stage === 'captcha'
+                    ? `ไม่สามารถยืนยัน Turnstile ได้ด้วย${accountLabel}`
+                    : result.stage === 'login'
+                        ? `ล็อกอินบัญชีรับ ItemCode ไม่สำเร็จด้วย${accountLabel}`
+                        : result.stage === 'exception'
+                            ? `เกิดข้อผิดพลาดระหว่างทำรายการด้วย${accountLabel}`
+                            : `ไม่สามารถส่ง itemcode ผ่านหน้าเว็บได้ด้วย${accountLabel}`;
+        const browserTelegramMessage = [
+            '🖥️ ผลการเคลมผ่าน Browser',
+            `โค้ด: ${serial}`,
+            `บัญชี: ${account.username} (${accountOrder}/${accounts.length})`,
+            `สถานะ: ${browserStatus}`,
+            `จำนวนครั้ง: ${result.browser_attempt || 1}/${result.browser_max_attempts || BROWSER_REDEEM_MAX_ATTEMPTS}`,
+            `ขั้นตอน: ${result.stage || 'unknown'}`,
+            `รายละเอียด: ${browserDetail}`
+        ].join('\n');
+        const browserTelegramSent = await sendTelegram(browserTelegramMessage);
+        if (browserTelegramSent) {
+            log(`[BROWSER] ส่งผลการเคลมผ่าน Browser ของ${accountLabel} ไป Telegram แล้ว`);
+        }
+
+        accountResults.push(result);
     }
 
-    if (result.maintenance) {
-        log(`[BROWSER] หน้าเว็บตอบกลับว่าอยู่ระหว่างปิดปรับปรุงระบบ (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
-    } else if (result.success) {
-        log(`[BROWSER] ส่ง itemcode ผ่านหน้าเว็บสำเร็จ: ${serial} (ครั้งที่ ${result.browser_attempt}/${result.browser_max_attempts})`);
-    } else {
-        log(`[BROWSER] flow ไม่สำเร็จหลังลอง ${result.browser_attempt}/${result.browser_max_attempts} ครั้ง (${result.stage || 'unknown'}): ${result.message || 'unknown error'}`);
-    }
+    const accountsSucceeded = accountResults.filter(item => item.success).length;
+    const allAccountsSucceeded = accountsSucceeded === accounts.length;
+    log(`[BROWSER] เคลม itemcode ครบทุกบัญชีแล้ว (${accountsSucceeded}/${accounts.length} สำเร็จ) จึงเข้าสู่ช่วงพักสแกน OCR`);
 
-    const browserStatus = result.maintenance
-        ? 'ปิดปรับปรุงระบบ'
-        : result.success
-            ? 'เคลมสำเร็จ'
-            : 'เคลมไม่สำเร็จ';
-    const browserDetail = result.maintenance
-        ? 'ปิดปรับปรุงระบบชั่วคราว กรุณาลองใหม่อีกครั้งในภายหลัง'
-        : result.success
-            ? 'ส่ง itemcode ผ่านหน้าเว็บเรียบร้อยแล้ว'
-            : result.stage === 'captcha'
-                ? 'ไม่สามารถยืนยัน Turnstile ได้'
-                : result.stage === 'login'
-                    ? 'ล็อกอินบัญชีสำรองไม่สำเร็จ'
-                    : result.stage === 'exception'
-                        ? 'เกิดข้อผิดพลาดระหว่างทำรายการ'
-                        : 'ไม่สามารถส่ง itemcode ผ่านหน้าเว็บได้';
-    const browserTelegramMessage = [
-        '🖥️ ผลการเคลมผ่าน Browser',
-        `โค้ด: ${serial}`,
-        `สถานะ: ${browserStatus}`,
-        `จำนวนครั้ง: ${result.browser_attempt || 1}/${result.browser_max_attempts || BROWSER_REDEEM_MAX_ATTEMPTS}`,
-        `ขั้นตอน: ${result.stage || 'unknown'}`,
-        `รายละเอียด: ${browserDetail}`
-    ].join('\n');
-    const browserTelegramSent = await sendTelegram(browserTelegramMessage);
-    if (browserTelegramSent) {
-        log(`[BROWSER] ส่งผลการเคลมผ่าน Browser ไป Telegram แล้ว`);
-    }
-
-    return result;
+    return {
+        ...accountResults[accountResults.length - 1],
+        success: allAccountsSucceeded,
+        partialSuccess: accountsSucceeded > 0 && !allAccountsSucceeded,
+        allAccountsCompleted: true,
+        accountsAttempted: accounts.length,
+        accountsSucceeded,
+        accountResults
+    };
 }
 
 // Send Telegram Notification
@@ -1320,8 +1411,8 @@ async function sendTelegram(message, redeemResult = null) {
         const data = redeemResult.data || {};
         const reason = data.message || data.error || redeemResult.message || "Unknown error";
 
-        // Ignore invalid itemcode spam
-        if (reason.toLowerCase().includes("invalid itemcode")) {
+        // Match node_service: suppress all known invalid-itemcode variants.
+        if (isInvalidItemCodeMessage(reason)) {
             return false;
         }
     }
@@ -1347,6 +1438,54 @@ async function sendTelegram(message, redeemResult = null) {
         log(`[-] Telegram network error: ${e.message}`);
     }
     return true;
+}
+
+// Send Discord Webhook Notification
+async function sendDiscord(message, redeemResult = null) {
+    const isEnabled = config.discord_enabled !== undefined ? !!config.discord_enabled : getDiscordWebhookUrls().length > 0;
+    if (!isEnabled) {
+        return false;
+    }
+
+    if (redeemResult && !redeemResult.success) {
+        const data = redeemResult.data || {};
+        const reason = data.message || data.error || redeemResult.message || 'Unknown error';
+
+        // Keep the same invalid-itemcode suppression rule as node_service.
+        if (isInvalidItemCodeMessage(reason)) {
+            return false;
+        }
+    }
+
+    const urls = getDiscordWebhookUrls();
+    if (urls.length === 0) {
+        return false;
+    }
+
+    const payload = {
+        username: 'TalesRunner Bot',
+        content: message
+    };
+    let sentAny = false;
+    for (const url of urls) {
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (response.ok) {
+                log(`[+] Discord Notification sent to ${url.substring(0, 45)}...`);
+                sentAny = true;
+            } else {
+                const text = await response.text();
+                log(`[-] Discord Webhook (${url.substring(0, 45)}...) returned failure (HTTP ${response.status}): ${text}`);
+            }
+        } catch (error) {
+            log(`[-] Discord network error for ${url.substring(0, 45)}...: ${error.message}`);
+        }
+    }
+    return sentAny;
 }
 
 // Parse wait time from message
@@ -1379,6 +1518,59 @@ function parseWaitTime(msg) {
     return 60;
 }
 
+async function retryCheckSerialAndNotify(serial, initialMessage) {
+    const initialMessageLower = String(initialMessage || '').toLowerCase();
+    let waitSeconds = initialMessageLower.includes('please wait')
+        ? parseWaitTime(initialMessage)
+        : 10;
+    let lastResult = null;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        log(`[*] Node: รอ ${waitSeconds} วินาทีก่อน check serial ซ้ำ (รอบที่ ${attempt}/3): ${serial}`);
+        logItemcodeEvent(serial, 'retry', `รอ ${waitSeconds} วินาทีก่อน check serial ซ้ำ`, attempt, 3);
+        await sleep(waitSeconds * 1000);
+
+        log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (check serial รอบที่ ${attempt}/3)...`);
+        await loginWithCredentials(config.username, config.password);
+
+        log(`[*] Node: กำลัง check serial ซ้ำรอบที่ ${attempt}/3 เพื่ออ่านรายการรางวัล: ${serial}...`);
+        lastResult = await redeemCode(serial);
+        const retryCheckSuccess = lastResult && lastResult.checkSuccess;
+        const retryData = (lastResult && lastResult.data) || {};
+        const retryMessage = retryData.message || retryData.error || (lastResult && lastResult.message) || 'Unknown error';
+        const retryMessageLower = String(retryMessage).toLowerCase();
+
+        if (retryCheckSuccess) {
+            const messageToSend = formatItemcodeNotification(serial, lastResult);
+            log(`[🎉] Node: check serial ซ้ำสำเร็จในรอบที่ ${attempt}: ${serial}`);
+            logItemcodeEvent(serial, 'retry_success', rewardDetailFromResult(lastResult) || 'check serial สำเร็จ', attempt, 3);
+
+            const sentTelegram = await sendTelegram(messageToSend, lastResult);
+            const sentDiscord = await sendDiscord(messageToSend, lastResult);
+            return {
+                retrySuccess: true,
+                result: lastResult,
+                sentTelegram,
+                sentDiscord
+            };
+        }
+
+        const stillWaiting = retryMessageLower.includes('please wait') ||
+            retryMessageLower.includes('captcha token field is required') ||
+            retryMessageLower.includes('captcha type is present');
+        if (!stillWaiting) {
+            log(`[❌] Node: check serial ซ้ำล้มเหลวด้วยข้อผิดพลาดอื่น: ${retryMessage}`);
+            break;
+        }
+
+        waitSeconds = retryMessageLower.includes('please wait')
+            ? parseWaitTime(retryMessage)
+            : 10;
+    }
+
+    return { retrySuccess: false, result: lastResult, sentTelegram: false, sentDiscord: false };
+}
+
 // Sleep OCR function helper
 async function sleepOcr(minutes, reason = 'notification') {
     if (reason === 'periodic') {
@@ -1405,12 +1597,66 @@ function isYoutubeChannel(url) {
 }
 
 // Helper to construct yt-dlp arguments with cookie options
+function detectYtdlBrowserCookieSource() {
+    if (process.platform === 'darwin') {
+        const chromeProfile = path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
+        if (fs.existsSync(chromeProfile)) return 'chrome';
+        const edgeProfile = path.join(os.homedir(), 'Library', 'Application Support', 'Microsoft Edge');
+        if (fs.existsSync(edgeProfile)) return 'edge';
+    }
+    if (process.platform === 'win32') {
+        const chromeProfile = path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
+        if (fs.existsSync(chromeProfile)) return 'chrome';
+        const edgeProfile = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Edge', 'User Data');
+        if (fs.existsSync(edgeProfile)) return 'edge';
+    }
+    return '';
+}
+
+function getYtdlJsRuntime() {
+    const candidates = process.platform === 'win32'
+        ? [
+            path.join(process.env.LOCALAPPDATA || '', 'deno', 'deno.exe'),
+            path.join(process.env.USERPROFILE || '', '.deno', 'bin', 'deno.exe'),
+            'C:\\Program Files\\Deno\\deno.exe'
+        ]
+        : [
+            '/opt/homebrew/bin/deno',
+            '/usr/local/bin/deno',
+            '/usr/bin/deno',
+            ...String(process.env.PATH || '')
+                .split(path.delimiter)
+                .filter(Boolean)
+                .map(directory => path.join(directory, 'deno'))
+        ];
+    const denoPath = [...new Set(candidates)].find(candidate => candidate && fs.existsSync(candidate));
+    if (denoPath) {
+        return { name: 'deno', spec: `deno:${denoPath}` };
+    }
+
+    // yt-dlp currently requires Node.js 22+ when Node is used as its JS runtime.
+    const nodeMajor = Number(process.versions.node.split('.')[0] || 0);
+    if (process.execPath && nodeMajor >= 22) {
+        return { name: 'node', spec: `node:${process.execPath}` };
+    }
+    return null;
+}
+
 function getYtdlArgs(args = []) {
     const finalArgs = [...args];
     if (config.ytdl_cookies_from_browser) {
         finalArgs.push('--cookies-from-browser', config.ytdl_cookies_from_browser);
     } else if (config.ytdl_cookies_file) {
         finalArgs.push('--cookies', config.ytdl_cookies_file);
+    } else {
+        const detectedCookieSource = detectYtdlBrowserCookieSource();
+        if (detectedCookieSource) {
+            finalArgs.push('--cookies-from-browser', detectedCookieSource);
+        }
+    }
+    const jsRuntime = getYtdlJsRuntime();
+    if (jsRuntime) {
+        finalArgs.push('--js-runtimes', jsRuntime.spec, '--remote-components', 'ejs:github');
     }
     return finalArgs;
 }
@@ -1479,21 +1725,67 @@ async function captureFrame(directUrl, outputPath) {
         } catch (e) { }
     }
 
-    try {
-        await execFileAsync(ffmpeg, [
+    const inputOptions = /^https?:\/\//i.test(String(directUrl || ''))
+        ? [
+            '-rw_timeout', '20000000',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5'
+        ]
+        : [];
+    const commandVariants = [
+        // Keep the same simple invocation used by node_service first.
+        [
+            '-nostdin',
             '-y',
             '-loglevel', 'error',
             '-i', directUrl,
             '-vframes', '1',
             '-f', 'image2',
             outputPath
-        ], { timeout: 10000 });
-
-        return fs.existsSync(outputPath);
-    } catch (e) {
-        log(`[-] ffmpeg: Frame capture failed: ${e.message}`);
-        return false;
+        ],
+        [
+            '-nostdin',
+            '-y',
+            '-loglevel', 'error',
+            ...inputOptions,
+            '-i', directUrl,
+            '-frames:v', '1',
+            '-f', 'image2',
+            outputPath
+        ]
+    ];
+    let lastError = null;
+    const attemptDiagnostics = [];
+    for (let attempt = 0; attempt < commandVariants.length; attempt++) {
+        const args = commandVariants[attempt];
+        try {
+            await execFileAsync(ffmpeg, args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+            if (fs.existsSync(outputPath)) return true;
+            attemptDiagnostics.push(`attempt ${attempt + 1}: exit=0 แต่ไม่พบไฟล์ภาพ`);
+        } catch (error) {
+            lastError = error;
+            const errorDetail = [
+                error.code ? `code=${error.code}` : '',
+                error.signal ? `signal=${error.signal}` : '',
+                error.killed ? 'killed=true' : '',
+                error.stderr ? String(error.stderr).trim() : '',
+                error.message ? String(error.message).trim() : ''
+            ].filter(Boolean).join(' | ').replace(/\s+/g, ' ').slice(-900);
+            attemptDiagnostics.push(`attempt ${attempt + 1}: ${errorDetail || 'ไม่ทราบข้อผิดพลาด'}`);
+            if (attempt < commandVariants.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
+
+    let sourceHost = 'unknown';
+    try { sourceHost = new URL(directUrl).host; } catch (e) { }
+    const diagnostic = (attemptDiagnostics.join(' ; ') || String(lastError?.stderr || lastError?.message || 'ไม่ทราบสาเหตุ'))
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(-1800);
+    const cookieSource = config.ytdl_cookies_from_browser || detectYtdlBrowserCookieSource() || 'none';
+    log(`[-] ffmpeg: Frame capture failed after ${commandVariants.length} attempts (source=${sourceHost}, path=${ffmpeg}, ytdl_cookies=${cookieSource}): ${diagnostic}`);
+    return false;
 }
 
 // Run OCR on image and return lines
@@ -1667,100 +1959,52 @@ async function processScan(directUrl) {
                     if (isWaitOnly) {
                         log(`[!] Node: ตรวจพบข้อความ Please wait/Captcha: "${msg}". ส่งแจ้งเตือนด่วน...`);
                         logItemcodeEvent(varCode, 'retry', msg);
-                        let sentTele = await sendTelegram(varCode, redeemResult);
-                        if (sentTele) {
+                        let sentTele = await sendTelegram(
+                            formatItemcodeNotification(varCode, redeemResult, `สถานะ: ${msg}`),
+                            redeemResult
+                        );
+                        let sentDisc = await sendDiscord(
+                            formatItemcodeNotification(varCode, redeemResult, `สถานะ: ${msg}`),
+                            redeemResult
+                        );
+                        if (sentTele || sentDisc) {
                             logNotifiedCode(varCode);
                         }
                         notified = true;
 
-                        const browserResult = await runBrowserRedeemAfterNotification(varCode);
-                        if (browserResult) {
-                            for (const v of variations) {
-                                history.add(v);
-                            }
-                            history.add(code);
-                            saveHistory();
+                        // Browser redemption and API check-retry run independently,
+                        // matching node_service. The check-retry path reads the reward
+                        // details and sends them to both Telegram and Discord.
+                        const browserPromise = runBrowserRedeemAfterNotification(varCode);
+                        const checkPromise = retryCheckSerialAndNotify(varCode, msg);
+                        const [browserSettled, checkSettled] = await Promise.allSettled([
+                            browserPromise,
+                            checkPromise
+                        ]);
 
-                            if (sentTele) {
-                                await sleepOcr(10);
-                            }
-
-                            success = true;
-                            break;
+                        const browserResult = browserSettled.status === 'fulfilled'
+                            ? browserSettled.value
+                            : null;
+                        if (browserSettled.status === 'rejected') {
+                            log(`[BROWSER] retry flow ล้มเหลว: ${browserSettled.reason?.message || browserSettled.reason}`);
                         }
 
-                        let waitSeconds = 10;
-                        if (msgStr.includes("please wait")) {
-                            waitSeconds = parseWaitTime(msg);
-                        }
-                        log(`[*] Node: ตรวจพบให้รอตามระบบ: ${waitSeconds} วินาที...`);
-
-                        let retrySuccess = false;
-                        let waitFailCount = 1;
-
-                        for (let attempt = 1; attempt <= 3; attempt++) {
-                            log(`[*] Node: กำลังนอนรอ ${waitSeconds} วินาทีก่อนลองใหม่ (Attempt ${attempt}/3)...`);
-                            logItemcodeEvent(varCode, 'retry', `รอ ${waitSeconds} วินาทีก่อนลองใหม่`, attempt, 3);
-                            await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-
-                            log(`[*] Node: กำลังเข้าสู่ระบบใหม่เพื่อรีเฟรช Token (Attempt ${attempt}/3)...`);
-                            await loginWithCredentials(config.username, config.password);
-
-                            log(`[*] Node: กำลังลองใหม่รอบที่ ${attempt}/3: ${varCode}...`);
-                            let retryResult = await redeemCode(varCode);
-                            let retryCheckSuccess = retryResult && retryResult.checkSuccess;
-                            let retryData = (retryResult && retryResult.data) || {};
-                            let retryMsg = retryData.message || retryData.error || (retryResult && retryResult.message) || "Unknown error";
-                            let retryMsgStr = String(retryMsg).toLowerCase();
-
-                            if (retryCheckSuccess) {
-                                log(`[🎉] Node: ลองใหม่สำเร็จในรอบที่ ${attempt}!`);
-                                logItemcodeEvent(varCode, 'retry_success', rewardDetailFromResult(retryResult) || 'check serial สำเร็จ', attempt, 3);
-                                redeemResult = retryResult;
-                                retrySuccess = true;
-                                break;
-                            }
-
-                            if (retryMsgStr.includes("please wait") || retryMsgStr.includes("captcha token field is required") || retryMsgStr.includes("captcha type is present")) {
-                                waitFailCount++;
-                                if (waitFailCount > 3) {
-                                    log(`[❌] Node: เกิดข้อผิดพลาด Please wait/Captcha เกิน 3 ครั้งแล้ว (สะสม). ข้ามโค้ดนี้เลย...`);
-                                    break;
-                                }
-                                if (retryMsgStr.includes("please wait")) {
-                                    waitSeconds = parseWaitTime(retryMsg);
-                                } else {
-                                    waitSeconds = 10;
-                                }
-                            } else {
-                                log(`[❌] Node: ลองใหม่ล้มเหลวด้วยข้อผิดพลาดอื่น: ${retryMsg}. หยุดลองใหม่...`);
-                                break;
-                            }
+                        const retryOutcome = checkSettled.status === 'fulfilled'
+                            ? checkSettled.value
+                            : { retrySuccess: false, result: null, sentTelegram: false, sentDiscord: false };
+                        if (checkSettled.status === 'rejected') {
+                            log(`[❌] Node: check serial retry flow ล้มเหลว: ${checkSettled.reason?.message || checkSettled.reason}`);
                         }
 
-                        if (retrySuccess) {
-                            let retryMessageToSend = "ไม่ทราบรางวัล";
-                            if (redeemResult.checkData) {
-                                try {
-                                    const reward = redeemResult.checkData.data?.reward;
-                                    const bundle = reward?.bundle;
-                                    if (bundle && bundle.name) {
-                                        const bundleName = bundle.name;
-                                        const items = bundle.items || [];
-                                        const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
-                                        const itemDetails = itemNames.join(",");
-                                        if (itemDetails) {
-                                            retryMessageToSend = `${itemDetails}`;
-                                        } else {
-                                            retryMessageToSend = `${bundleName}`;
-                                        }
-                                    }
-                                } catch (e) {
-                                    log(`[-] Error formatting retry message: ${e.message}`);
-                                }
-                            }
-                            sentTele = await sendTelegram(retryMessageToSend, redeemResult);
+                        if (retryOutcome.retrySuccess) {
+                            redeemResult = retryOutcome.result;
+                            sentTele = retryOutcome.sentTelegram || sentTele;
+                            sentDisc = retryOutcome.sentDiscord || sentDisc;
+                        }
 
+                        const browserSuccess = browserResult && browserResult.success === true;
+                        if (browserSuccess || retryOutcome.retrySuccess) {
+                            log(`[+] Node: parallel retry จบสำเร็จ (Browser=${browserSuccess ? 'สำเร็จ' : 'ไม่สำเร็จ'}, Check=${retryOutcome.retrySuccess ? 'สำเร็จ' : 'ไม่สำเร็จ'})`);
                         }
 
                         for (const v of variations) {
@@ -1769,7 +2013,7 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele) {
+                        if (sentTele || sentDisc) {
                             await sleepOcr(10);
                         }
                         
@@ -1779,35 +2023,17 @@ async function processScan(directUrl) {
 
                     if (shouldNotify) {
                         let sentTele = true;
+                        let sentDisc = true;
                         if (!notified) {
                             if (checkSuccess) {
                                 log(`[⭐] Node: ตรวจพบโค้ดผ่าน Check Serial (200 OK): ${varCode}. ส่งแจ้งเตือน...`);
                             } else {
                                 log(`[!] Node: ตรวจพบข้อความแจ้งเตือนสำคัญ (Rate limit/Captcha). ส่งแจ้งเตือน...`);
                             }
-                            // Build formatted message
-                            let messageToSend = `${varCode}\nไม่ทราบรางวัล`;
-                            if (checkSuccess && redeemResult.checkData) {
-                                try {
-                                    const reward = redeemResult.checkData.data?.reward;
-                                    const bundle = reward?.bundle;
-                                    if (bundle && bundle.name) {
-                                        const bundleName = bundle.name;
-                                        const items = bundle.items || [];
-                                        const itemNames = items.map(it => it.item?.name || it.name).filter(Boolean);
-                                        const itemDetails = itemNames.join(",");
-                                        if (itemDetails) {
-                                            messageToSend = `${varCode}\n${itemDetails}`;
-                                        } else {
-                                            messageToSend = `${varCode}\n${bundleName}`;
-                                        }
-                                    }
-                                } catch (e) {
-                                    log(`[-] Error formatting message: ${e.message}`);
-                                }
-                            }
+                            const messageToSend = formatItemcodeNotification(varCode, redeemResult);
                             sentTele = await sendTelegram(messageToSend, redeemResult);
-                            if (sentTele) {
+                            sentDisc = await sendDiscord(messageToSend, redeemResult);
+                            if (sentTele || sentDisc) {
                                 logNotifiedCode(varCode);
                             }
                             notified = true;
@@ -1823,7 +2049,7 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele) {
+                        if (sentTele || sentDisc) {
                             await sleepOcr(10);
                         }
                         
@@ -2036,7 +2262,14 @@ async function main() {
     log(`  ช่อง/วิดีโอเป้าหมาย: ${config.youtube_url}`);
     log(`  ความถี่ในการสแกน: ${config.scan_interval} วินาที`);
     log(`  แจ้งเตือน Telegram: ${config.telegram_token ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
-    log(`  Browser itemcode ด้วยบัญชีสำรอง: ${config.browser_redeem_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    const ytdlCookieSource = config.ytdl_cookies_from_browser || detectYtdlBrowserCookieSource() || 'ไม่มี';
+    log(`  yt-dlp cookies จาก browser: ${ytdlCookieSource}`);
+    const ytdlJsRuntime = getYtdlJsRuntime();
+    log(`  yt-dlp JS runtime: ${ytdlJsRuntime ? `${ytdlJsRuntime.name} (${ytdlJsRuntime.spec}) + EJS` : 'ไม่พบ'}`);
+    const discordWebhookUrls = getDiscordWebhookUrls();
+    log(`  แจ้งเตือน Discord ${discordWebhookUrls.length} Webhook: ${config.discord_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
+    const itemcodeAccounts = getItemcodeAccounts();
+    log(`  Browser itemcode ด้วยบัญชีรับ ItemCode ${itemcodeAccounts.length} บัญชี: ${config.browser_redeem_enabled ? 'เปิดใช้งาน' : 'ปิดใช้งาน'}`);
     if (config.proxy_url) {
         log(`  Proxy Server: ${config.proxy_url}`);
         log(`  [⚠️] บอทจะเชื่อมต่อผ่าน Proxy Server อัตโนมัติ`);
@@ -2050,12 +2283,15 @@ async function main() {
         log(`[🧪] โหมดทดสอบ browser itemcode: ${testCode}`);
         log(`==================================================`);
 
-        if (!config.username2 || !config.password2) {
-            log(`[RESULT] ไม่ได้กำหนด username2/password2 ใน service_config.json`);
+        const itemcodeAccounts = getItemcodeAccounts();
+        const testAccount = itemcodeAccounts[0];
+        if (!testAccount) {
+            log(`[RESULT] ยังไม่ได้กำหนดบัญชีสำหรับรับ ItemCode ใน service_config.json`);
             process.exit(1);
         }
 
-        const result = await redeemCodeWithBrowser(testCode, config.username2, config.password2);
+        log(`[🧪] ใช้บัญชีรับ ItemCode ลำดับที่ 1/${itemcodeAccounts.length}: ${testAccount.username}`);
+        const result = await redeemCodeWithBrowser(testCode, testAccount.username, testAccount.password);
         logItemcodeEvent(
             testCode,
             result.success ? 'redeemed' : 'redeem_failed',
@@ -2140,19 +2376,21 @@ async function main() {
         log(`\n==================================================`);
         log(`[🧪] โหมดทดสอบการล็อกอิน (--test-login)`);
         log(`[1] บัญชีหลัก (${config.username || 'ไม่ได้ระบุ'}): ${primaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว (ติด Cloudflare Verification)'}`);
-        let secondaryLoginSuccess = true;
-        
-        if (config.username2 && config.password2) {
-            log(`[*] กำลังทดสอบล็อกอินบัญชีสำรองผ่าน Browser + Turnstile (${config.username2})...`);
-            secondaryLoginSuccess = await loginWithBrowserForAccessToken(
-                config.username2,
-                config.password2,
+        let itemcodeAccountsLoginSuccess = true;
+        const itemcodeAccounts = getItemcodeAccounts();
+        for (let index = 0; index < itemcodeAccounts.length; index++) {
+            const account = itemcodeAccounts[index];
+            log(`[*] กำลังทดสอบล็อกอินบัญชีรับ ItemCode ลำดับที่ ${index + 1}/${itemcodeAccounts.length} ผ่าน Browser + Turnstile (${account.username})...`);
+            const accountLoginSuccess = await loginWithBrowserForAccessToken(
+                account.username,
+                account.password,
                 { persistSession: false }
             );
-            log(`[2] บัญชีสำรอง (${config.username2}): ${secondaryLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
+            if (!accountLoginSuccess) itemcodeAccountsLoginSuccess = false;
+            log(`[${index + 2}] บัญชีรับ ItemCode ลำดับที่ ${index + 1} (${account.username}): ${accountLoginSuccess ? '✅ สำเร็จ' : '❌ ล้มเหลว'}`);
         }
         log(`==================================================`);
-        process.exit(primaryLoginSuccess && secondaryLoginSuccess ? 0 : 1);
+        process.exit(primaryLoginSuccess && itemcodeAccountsLoginSuccess ? 0 : 1);
     }
 
     const redeemArgIdx = process.argv.findIndex(arg => arg === '--redeem' || arg === '--check');

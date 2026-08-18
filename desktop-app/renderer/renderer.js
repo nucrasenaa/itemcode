@@ -4,10 +4,15 @@ const elements = {
     requirementSummary: document.getElementById('requirementSummary'),
     refreshRequirements: document.getElementById('refreshRequirements'),
     workspaceCard: document.getElementById('workspaceCard'),
+    itemcodeAccountsList: document.getElementById('itemcodeAccountsList'),
+    addItemcodeAccount: document.getElementById('addItemcodeAccount'),
+    discordWebhookList: document.getElementById('discordWebhookList'),
+    addDiscordWebhook: document.getElementById('addDiscordWebhook'),
     startStop: document.getElementById('startStop'),
     testLogin: document.getElementById('testLogin'),
     testItemcode: document.getElementById('testItemcode'),
     testTelegram: document.getElementById('testTelegram'),
+    testDiscord: document.getElementById('testDiscord'),
     itemcodeModal: document.getElementById('itemcodeModal'),
     itemcodeForm: document.getElementById('itemcodeForm'),
     testItemcodeValue: document.getElementById('testItemcodeValue'),
@@ -29,6 +34,8 @@ let running = false;
 let eventCount = 0;
 let toastTimer = null;
 let debugLogStarted = false;
+let itemcodeAccounts = [{ username: '', password: '' }];
+let discordWebhooks = [{ url: '' }];
 
 function showToast(message, error = false) {
     elements.toast.textContent = message;
@@ -46,25 +53,187 @@ function toggleSection(button) {
     button.setAttribute('aria-expanded', String(!collapsed));
 }
 
+function normalizeItemcodeAccounts(values) {
+    const raw = Array.isArray(values?.itemcodeAccounts)
+        ? values.itemcodeAccounts
+        : values?.username2 || values?.password2
+            ? [{ username: values.username2, password: values.password2 }]
+            : [];
+    const accounts = raw.map(account => ({
+        username: String(account?.username || ''),
+        password: String(account?.password || '')
+    }));
+    return accounts.length > 0 ? accounts : [{ username: '', password: '' }];
+}
+
+function readItemcodeAccounts() {
+    return [...elements.itemcodeAccountsList.querySelectorAll('.itemcode-account-row')].map(row => ({
+        username: row.querySelector('[data-account-field="username"]')?.value || '',
+        password: row.querySelector('[data-account-field="password"]')?.value || ''
+    }));
+}
+
+function markConfigDirty() {
+    elements.configStatus.textContent = 'มีการแก้ไข';
+    elements.configStatus.classList.remove('saved');
+}
+
+function renderItemcodeAccounts(accounts = itemcodeAccounts) {
+    itemcodeAccounts = accounts.length > 0 ? accounts : [{ username: '', password: '' }];
+    elements.itemcodeAccountsList.replaceChildren();
+
+    itemcodeAccounts.forEach((account, index) => {
+        const row = document.createElement('div');
+        row.className = 'itemcode-account-row';
+        row.dataset.accountIndex = String(index);
+
+        const order = document.createElement('div');
+        order.className = 'account-order';
+        order.textContent = String(index + 1);
+
+        const usernameField = document.createElement('label');
+        usernameField.className = 'field';
+        const usernameLabel = document.createElement('span');
+        usernameLabel.textContent = 'Username รับ ItemCode';
+        const usernameInput = document.createElement('input');
+        usernameInput.type = 'text';
+        usernameInput.autocomplete = 'username';
+        usernameInput.placeholder = 'กรอก username';
+        usernameInput.value = account.username;
+        usernameInput.dataset.accountField = 'username';
+        usernameInput.addEventListener('input', markConfigDirty);
+        usernameField.append(usernameLabel, usernameInput);
+
+        const passwordField = document.createElement('label');
+        passwordField.className = 'field';
+        const passwordLabel = document.createElement('span');
+        passwordLabel.textContent = 'Password รับ ItemCode';
+        const passwordInput = document.createElement('input');
+        passwordInput.type = 'password';
+        passwordInput.autocomplete = 'current-password';
+        passwordInput.placeholder = 'กรอก password';
+        passwordInput.value = account.password;
+        passwordInput.dataset.accountField = 'password';
+        passwordInput.addEventListener('input', markConfigDirty);
+        passwordField.append(passwordLabel, passwordInput);
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'button button-ghost remove-account';
+        remove.textContent = 'ลบ';
+        remove.disabled = itemcodeAccounts.length <= 1;
+        remove.addEventListener('click', () => {
+            if (readItemcodeAccounts().length <= 1) return;
+            const next = readItemcodeAccounts();
+            next.splice(index, 1);
+            renderItemcodeAccounts(next);
+            markConfigDirty();
+        });
+
+        row.append(order, usernameField, passwordField, remove);
+        elements.itemcodeAccountsList.append(row);
+    });
+    elements.addItemcodeAccount.disabled = running;
+}
+
+function normalizeDiscordWebhooks(values) {
+    const raw = Array.isArray(values?.discordWebhookUrls)
+        ? values.discordWebhookUrls
+        : Array.isArray(values?.discord_webhook_urls)
+            ? values.discord_webhook_urls
+            : Array.isArray(values?.discord_webhook_url)
+                ? values.discord_webhook_url
+                : typeof values?.discord_webhook_url === 'string'
+                    ? values.discord_webhook_url.split(',')
+                    : values?.discordWebhookUrl
+                        ? [values.discordWebhookUrl]
+                        : [];
+    const urls = raw.map(url => String(url || '')).map(url => ({ url }));
+    return urls.length > 0 ? urls : [{ url: '' }];
+}
+
+function readDiscordWebhooks() {
+    return [...elements.discordWebhookList.querySelectorAll('.discord-webhook-row')]
+        .map(row => row.querySelector('[data-webhook-field="url"]')?.value.trim() || '')
+        .filter(Boolean);
+}
+
+function renderDiscordWebhooks(webhooks = discordWebhooks) {
+    discordWebhooks = webhooks.length > 0 ? webhooks : [{ url: '' }];
+    elements.discordWebhookList.replaceChildren();
+
+    discordWebhooks.forEach((webhook, index) => {
+        const row = document.createElement('div');
+        row.className = 'discord-webhook-row';
+        row.dataset.webhookIndex = String(index);
+
+        const order = document.createElement('div');
+        order.className = 'webhook-order';
+        order.textContent = String(index + 1);
+
+        const field = document.createElement('label');
+        field.className = 'field';
+        const label = document.createElement('span');
+        label.textContent = 'Discord Webhook URL';
+        const input = document.createElement('input');
+        input.type = 'url';
+        input.autocomplete = 'off';
+        input.placeholder = 'https://discord.com/api/webhooks/...';
+        input.value = webhook.url;
+        input.dataset.webhookField = 'url';
+        input.addEventListener('input', markConfigDirty);
+        field.append(label, input);
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'button button-ghost remove-webhook';
+        remove.textContent = 'ลบ';
+        remove.disabled = discordWebhooks.length <= 1;
+        remove.addEventListener('click', () => {
+            const rows = [...elements.discordWebhookList.querySelectorAll('.discord-webhook-row')];
+            if (rows.length <= 1) return;
+            const next = rows
+                .map(item => ({ url: item.querySelector('[data-webhook-field="url"]')?.value || '' }));
+            next.splice(index, 1);
+            renderDiscordWebhooks(next);
+            markConfigDirty();
+        });
+
+        row.append(order, field, remove);
+        elements.discordWebhookList.append(row);
+    });
+    elements.addDiscordWebhook.disabled = running;
+}
+
 function inputValues() {
+    const accounts = readItemcodeAccounts();
+    const firstAccount = accounts.find(account => account.username.trim() && account.password) || {};
+    const webhookUrls = readDiscordWebhooks();
     return {
         username: document.getElementById('username').value,
         password: document.getElementById('password').value,
-        username2: document.getElementById('username2').value,
-        password2: document.getElementById('password2').value,
+        itemcodeAccounts: accounts,
+        // Keep the first account available for older service builds.
+        username2: firstAccount.username || '',
+        password2: firstAccount.password || '',
         telegramToken: document.getElementById('telegramToken').value,
         telegramChatId: document.getElementById('telegramChatId').value,
-        telegramEnabled: document.getElementById('telegramEnabled').checked
+        telegramEnabled: document.getElementById('telegramEnabled').checked,
+        discordWebhookUrls: webhookUrls,
+        discordEnabled: document.getElementById('discordEnabled').checked
     };
 }
 
 function setInputs(values) {
-    for (const key of ['username', 'password', 'username2', 'password2']) {
+    for (const key of ['username', 'password']) {
         document.getElementById(key).value = values?.[key] || '';
     }
+    renderItemcodeAccounts(normalizeItemcodeAccounts(values));
     document.getElementById('telegramToken').value = values?.telegramToken || '';
     document.getElementById('telegramChatId').value = values?.telegramChatId || '';
     document.getElementById('telegramEnabled').checked = Boolean(values?.telegramEnabled);
+    renderDiscordWebhooks(normalizeDiscordWebhooks(values));
+    document.getElementById('discordEnabled').checked = Boolean(values?.discordEnabled);
 }
 
 function setRunning(value, mode = 'running') {
@@ -83,6 +252,15 @@ function setRunning(value, mode = 'running') {
     elements.testLogin.disabled = running;
     elements.testItemcode.disabled = running;
     elements.testTelegram.disabled = running;
+    elements.testDiscord.disabled = running;
+    elements.addItemcodeAccount.disabled = running;
+    elements.addDiscordWebhook.disabled = running;
+    for (const button of document.querySelectorAll('.remove-account')) {
+        button.disabled = running || elements.itemcodeAccountsList.querySelectorAll('.itemcode-account-row').length <= 1;
+    }
+    for (const button of document.querySelectorAll('.remove-webhook')) {
+        button.disabled = running || elements.discordWebhookList.querySelectorAll('.discord-webhook-row').length <= 1;
+    }
     for (const input of document.querySelectorAll('.field input, .switch-label input')) input.disabled = running;
 }
 
@@ -243,17 +421,17 @@ async function toggleService() {
         return;
     }
     const values = inputValues();
-    if (!values.username || !values.password || !values.username2 || !values.password2) {
-        showToast('กรุณากรอกข้อมูลให้ครบทั้ง 4 ช่อง', true);
+    const readyValues = credentialsReady(values);
+    if (!readyValues) {
         return;
     }
     elements.startStop.disabled = true;
     try {
-        const saved = await api.saveSettings(values);
+        const saved = await api.saveSettings(readyValues);
         if (!saved.ok) throw new Error('บันทึกข้อมูลไม่สำเร็จ');
         elements.configStatus.textContent = 'บันทึกแล้ว';
         elements.configStatus.classList.add('saved');
-        const result = await api.start(values);
+        const result = await api.start(readyValues);
         if (!result.running) throw new Error('เปิด service ไม่สำเร็จ');
         setRunning(true);
         showToast('เริ่มการสแกนแล้ว');
@@ -265,13 +443,30 @@ async function toggleService() {
     }
 }
 
-function credentialsReady() {
-    const values = inputValues();
-    if (!values.username || !values.password || !values.username2 || !values.password2) {
-        showToast('กรุณากรอกข้อมูลให้ครบทั้ง 4 ช่อง', true);
+function credentialsReady(values = inputValues()) {
+    const accounts = values.itemcodeAccounts || [];
+    const completeAccounts = accounts.filter(account => account.username.trim() && account.password);
+    const incompleteAccounts = accounts.filter(account =>
+        (account.username.trim() || account.password) && !(account.username.trim() && account.password)
+    );
+    if (!values.username || !values.password) {
+        showToast('กรุณากรอก username/password สำหรับ Check Serial', true);
         return null;
     }
-    return values;
+    if (incompleteAccounts.length > 0) {
+        showToast('กรุณากรอก username/password ของบัญชีรับ ItemCode ให้ครบทุกแถว', true);
+        return null;
+    }
+    if (completeAccounts.length === 0) {
+        showToast('กรุณาเพิ่ม username/password สำหรับรับ ItemCode อย่างน้อย 1 บัญชี', true);
+        return null;
+    }
+    return {
+        ...values,
+        itemcodeAccounts: completeAccounts,
+        username2: completeAccounts[0].username.trim(),
+        password2: completeAccounts[0].password
+    };
 }
 
 async function startTest(mode, code = '') {
@@ -323,6 +518,27 @@ async function runTelegramTest() {
     }
 }
 
+async function runDiscordTest() {
+    if (running) return;
+    const values = inputValues();
+    if (values.discordWebhookUrls.length === 0) {
+        showToast('กรุณาเพิ่ม Discord Webhook อย่างน้อย 1 รายการก่อนทดสอบ', true);
+        return;
+    }
+    elements.testDiscord.disabled = true;
+    try {
+        await api.saveSettings(values);
+        const result = await api.testDiscord(values);
+        elements.configStatus.textContent = result.ok ? 'Discord ทดสอบสำเร็จ' : 'Discord ทดสอบไม่สำเร็จ';
+        elements.configStatus.classList.toggle('saved', result.ok);
+        showToast(result.message || (result.ok ? 'ส่งข้อความ Discord สำเร็จ' : 'ส่งข้อความ Discord ไม่สำเร็จ'), !result.ok);
+    } catch (error) {
+        showToast(error.message || 'ทดสอบ Discord ไม่สำเร็จ', true);
+    } finally {
+        elements.testDiscord.disabled = running;
+    }
+}
+
 function openItemcodeModal() {
     if (running) return;
     elements.itemcodeModal.hidden = false;
@@ -339,7 +555,25 @@ elements.startStop.addEventListener('click', toggleService);
 elements.testLogin.addEventListener('click', () => startTest('test-login'));
 elements.testItemcode.addEventListener('click', openItemcodeModal);
 elements.testTelegram.addEventListener('click', runTelegramTest);
+elements.testDiscord.addEventListener('click', runDiscordTest);
 elements.logFilter.addEventListener('change', applyLogFilter);
+elements.addItemcodeAccount.addEventListener('click', () => {
+    if (running) return;
+    const next = readItemcodeAccounts();
+    next.push({ username: '', password: '' });
+    renderItemcodeAccounts(next);
+    markConfigDirty();
+    elements.itemcodeAccountsList.lastElementChild?.querySelector('[data-account-field="username"]')?.focus();
+});
+elements.addDiscordWebhook.addEventListener('click', () => {
+    if (running) return;
+    const next = [...elements.discordWebhookList.querySelectorAll('.discord-webhook-row')]
+        .map(row => ({ url: row.querySelector('[data-webhook-field="url"]')?.value || '' }));
+    next.push({ url: '' });
+    renderDiscordWebhooks(next);
+    markConfigDirty();
+    elements.discordWebhookList.lastElementChild?.querySelector('[data-webhook-field="url"]')?.focus();
+});
 elements.clearDebugLog.addEventListener('click', () => {
     elements.debugLog.textContent = 'ยังไม่มีข้อความจาก service';
     debugLogStarted = false;
@@ -359,14 +593,13 @@ elements.itemcodeForm.addEventListener('submit', async event => {
     await startTest('test-itemcode', code);
 });
 for (const input of document.querySelectorAll('.field input')) {
-    input.addEventListener('input', () => {
-        elements.configStatus.textContent = 'มีการแก้ไข';
-        elements.configStatus.classList.remove('saved');
-    });
+    input.addEventListener('input', markConfigDirty);
 }
 document.getElementById('telegramEnabled').addEventListener('change', () => {
-    elements.configStatus.textContent = 'มีการแก้ไข';
-    elements.configStatus.classList.remove('saved');
+    markConfigDirty();
+});
+document.getElementById('discordEnabled').addEventListener('change', () => {
+    markConfigDirty();
 });
 
 api.onServiceState(state => {

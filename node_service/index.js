@@ -1607,21 +1607,43 @@ async function captureFrame(directUrl, outputPath) {
         } catch (e) { }
     }
 
-    try {
-        await execFileAsync(ffmpeg, [
-            '-y',
-            '-loglevel', 'error',
-            '-i', directUrl,
-            '-vframes', '1',
-            '-f', 'image2',
-            outputPath
-        ], { timeout: 10000 });
-
-        return fs.existsSync(outputPath);
-    } catch (e) {
-        log(`[-] ffmpeg: Frame capture failed: ${e.message}`);
-        return false;
+    const inputOptions = /^https?:\/\//i.test(String(directUrl || ''))
+        ? [
+            '-rw_timeout', '20000000',
+            '-reconnect', '1',
+            '-reconnect_streamed', '1',
+            '-reconnect_delay_max', '5'
+        ]
+        : [];
+    const args = [
+        '-nostdin',
+        '-y',
+        '-loglevel', 'error',
+        ...inputOptions,
+        '-i', directUrl,
+        '-frames:v', '1',
+        '-f', 'image2',
+        outputPath
+    ];
+    let lastError = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+            await execFileAsync(ffmpeg, args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+            if (fs.existsSync(outputPath)) return true;
+        } catch (error) {
+            lastError = error;
+            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1000));
+        }
     }
+
+    let sourceHost = 'unknown';
+    try { sourceHost = new URL(directUrl).host; } catch (e) { }
+    const diagnostic = String(lastError?.stderr || lastError?.message || 'unknown reason')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(-1200);
+    log(`[-] ffmpeg: Frame capture failed after 2 attempts (source=${sourceHost}, path=${ffmpeg}): ${diagnostic}`);
+    return false;
 }
 
 // Run OCR on image and return lines

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
     testLogin: (settings) => ipcRenderer.invoke('service:test-login', settings),
     testItemcode: (payload) => ipcRenderer.invoke('service:test-itemcode', payload),
     testTelegram: (settings) => ipcRenderer.invoke('telegram:test', settings),
+    testDiscord: (settings) => ipcRenderer.invoke('discord:test', settings),
     stop: () => ipcRenderer.invoke('service:stop'),
     getServiceState: () => ipcRenderer.invoke('service:state'),
     onRequirementsUpdate: (callback) => {

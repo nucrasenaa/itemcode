@@ -25,7 +25,7 @@
 * **ลิงก์หน้าคู่มือและตัวติดตั้ง:** ดูรายละเอียดได้ที่ [web_app/README.md](file:///Users/crase/OS/itemcode/web_app/README.md)
 
 ### 4. [equality-itemcode-version](file:///Users/crase/OS/itemcode/equality-itemcode-version/README.md)
-รุ่นแยกของ Node.js Service ที่ตัด Discord ออก เหลือ Telegram แบบ optional
+รุ่นแยกของ Node.js Service ที่รองรับ Discord Webhook หลายรายการและ Telegram แบบ optional
 และใช้ Browser flow อัตโนมัติสำหรับ login, Turnstile และการใช้ itemcode:
 
 ```bash
@@ -41,7 +41,7 @@ bash equality-itemcode-version/install.sh
 
 ## 🖥️ Desktop Application สำหรับ Windows / macOS
 
-มีหน้าจอ Electron สำหรับตรวจสอบ requirement, กรอกบัญชี 4 ช่อง และควบคุม service เดิม:
+มีหน้าจอ Electron สำหรับตรวจสอบ requirement, กรอกบัญชี Check Serial และเพิ่มบัญชีรับ ItemCode ได้หลายบัญชี:
 
 ```bash
 cd desktop-app
@@ -50,7 +50,7 @@ npm start
 ```
 
 เมื่อเปิดครั้งแรกให้กด `Download` ในรายการที่ยังไม่พร้อม แล้วกด `ตรวจสอบอีกครั้ง` จากนั้นกรอก
-username/password สำหรับ Check Serial และ username/password สำหรับรับ ItemCode แล้วกด `Start`
+กรอก username/password สำหรับ Check Serial จากนั้นเพิ่ม username/password สำหรับรับ ItemCode ได้เรื่อย ๆ ระบบจะใช้บัญชีตามลำดับที่แสดง และเพิ่ม Discord Webhook ได้หลายรายการก่อนกด `Start`
 
 หน้าจอ log จะแสดงเฉพาะ ItemCode, รายละเอียด, สถานะรับไอเทม และ retry แต่ละรอบ
 
