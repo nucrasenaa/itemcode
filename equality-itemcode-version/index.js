@@ -1701,16 +1701,13 @@ function getYtdlJsRuntime() {
     return null;
 }
 
-function getYtdlArgs(args = []) {
+function getYtdlArgs(args = [], options = {}) {
     const finalArgs = [...args];
-    if (config.ytdl_cookies_from_browser) {
-        finalArgs.push('--cookies-from-browser', config.ytdl_cookies_from_browser);
-    } else if (config.ytdl_cookies_file) {
-        finalArgs.push('--cookies', config.ytdl_cookies_file);
-    } else {
-        const detectedCookieSource = detectYtdlBrowserCookieSource();
-        if (detectedCookieSource) {
-            finalArgs.push('--cookies-from-browser', detectedCookieSource);
+    if (options.includeCookies !== false) {
+        if (config.ytdl_cookies_from_browser) {
+            finalArgs.push('--cookies-from-browser', config.ytdl_cookies_from_browser);
+        } else if (config.ytdl_cookies_file) {
+            finalArgs.push('--cookies', config.ytdl_cookies_file);
         }
     }
     const jsRuntime = getYtdlJsRuntime();
@@ -1718,6 +1715,22 @@ function getYtdlArgs(args = []) {
         finalArgs.push('--js-runtimes', jsRuntime.spec, '--remote-components', 'ejs:github');
     }
     return finalArgs;
+}
+
+function isCookieDecryptError(error) {
+    const detail = `${error?.message || ''} ${error?.stderr || ''}`.toLowerCase();
+    return detail.includes('dpapi') || detail.includes('failed to decrypt');
+}
+
+async function execYtdl(args, timeout = 15000, label = 'yt-dlp') {
+    const ytdl = config.ytdl_path || 'yt-dlp';
+    try {
+        return await execFileAsync(ytdl, getYtdlArgs(args), { timeout });
+    } catch (error) {
+        if (!isCookieDecryptError(error)) throw error;
+        log(`[yt-dlp] ${label}: Chrome cookie ถอดรหัสไม่ได้ กำลังลองใหม่โดยไม่ใช้ cookies-from-browser`);
+        return execFileAsync(ytdl, getYtdlArgs(args, { includeCookies: false }), { timeout });
+    }
 }
 
 // Get Channel Live stream Video URL
@@ -1732,7 +1745,7 @@ async function checkChannelLive(channelUrl) {
     }
 
     try {
-        const { stdout } = await execFileAsync(ytdl, getYtdlArgs(['--get-id', liveUrl]), { timeout: 15000 });
+        const { stdout } = await execYtdl(['--get-id', liveUrl], 15000, 'checkChannelLive');
         const videoId = stdout.trim();
         if (videoId && !videoId.includes('\n')) {
             return `https://www.youtube.com/watch?v=${videoId}`;
@@ -1747,7 +1760,7 @@ async function checkChannelLive(channelUrl) {
 async function isStreamLive(videoUrl) {
     const ytdl = config.ytdl_path || 'yt-dlp';
     try {
-        const { stdout } = await execFileAsync(ytdl, getYtdlArgs(['--print', 'is_live', videoUrl]), { timeout: 15000 });
+        const { stdout } = await execYtdl(['--print', 'is_live', videoUrl], 15000, 'isStreamLive');
         const result = stdout.trim().toLowerCase();
         return result === 'true';
     } catch (e) {
@@ -1760,11 +1773,11 @@ async function isStreamLive(videoUrl) {
 async function resolveDirectUrl(videoUrl) {
     const ytdl = config.ytdl_path || 'yt-dlp';
     try {
-        const { stdout } = await execFileAsync(ytdl, getYtdlArgs([
+        const { stdout } = await execYtdl([
             '-g',
             '-f', '134/bestvideo[height<=360]/best',
             videoUrl
-        ]), { timeout: 15000 });
+        ], 15000, 'resolveDirectUrl');
         const directUrl = stdout.trim();
         if (directUrl) {
             return directUrl;
@@ -1793,16 +1806,6 @@ async function captureFrame(directUrl, outputPath) {
         ]
         : [];
     const commandVariants = [
-        // Keep the same simple invocation used by node_service first.
-        [
-            '-nostdin',
-            '-y',
-            '-loglevel', 'error',
-            '-i', directUrl,
-            '-vframes', '1',
-            '-f', 'image2',
-            outputPath
-        ],
         [
             '-nostdin',
             '-y',
@@ -1810,6 +1813,15 @@ async function captureFrame(directUrl, outputPath) {
             ...inputOptions,
             '-i', directUrl,
             '-frames:v', '1',
+            '-f', 'image2',
+            outputPath
+        ],
+        [
+            '-nostdin',
+            '-y',
+            '-loglevel', 'error',
+            '-i', directUrl,
+            '-vframes', '1',
             '-f', 'image2',
             outputPath
         ]
@@ -1842,7 +1854,7 @@ async function captureFrame(directUrl, outputPath) {
         .replace(/\s+/g, ' ')
         .trim()
         .slice(-1800);
-    const cookieSource = config.ytdl_cookies_from_browser || detectYtdlBrowserCookieSource() || 'none';
+    const cookieSource = config.ytdl_cookies_from_browser || 'none';
     log(`[-] ffmpeg: Frame capture failed after ${commandVariants.length} attempts (source=${sourceHost}, path=${ffmpeg}, ytdl_cookies=${cookieSource}): ${diagnostic}`);
     return false;
 }

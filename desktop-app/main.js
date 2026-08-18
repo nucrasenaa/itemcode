@@ -612,6 +612,9 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         // Do not keep the development-machine Documents path from the sample
         // config when running the packaged service.
         config.ocr_helper_path_win = path.join(runtime, 'ocr_helper.ps1');
+        // Desktop has no cookie-picker UI. Match node_service and avoid a
+        // stale Chrome DPAPI setting from an older runtime config.
+        config.ytdl_cookies_from_browser = '';
     }
     writeConfig(config);
 
