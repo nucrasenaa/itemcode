@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('itemcodeDesktop', {
     checkRequirements: () => ipcRenderer.invoke('requirements:check'),
+    repairRequirementPaths: () => ipcRenderer.invoke('requirements:repair'),
     downloadRequirement: (id) => ipcRenderer.invoke('requirements:download', id),
     openRequirementHelp: (id) => ipcRenderer.invoke('requirements:help', id),
     loadSettings: () => ipcRenderer.invoke('settings:load'),

@@ -218,6 +218,42 @@ function uniquePaths(values) {
     return [...new Set(values.filter(Boolean))];
 }
 
+function windowsFfmpegCandidates() {
+    if (process.platform !== 'win32') return [];
+
+    const candidates = [];
+    const wingetRoots = [
+        path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Packages'),
+        path.join(process.env.ProgramFiles || '', 'Microsoft', 'WinGet', 'Packages')
+    ].filter(root => root && fs.existsSync(root));
+
+    for (const root of wingetRoots) {
+        try {
+            const packages = fs.readdirSync(root, { withFileTypes: true })
+                .filter(entry => entry.isDirectory() && entry.name.toLowerCase().includes('ffmpeg'))
+                .map(entry => path.join(root, entry.name));
+            for (const packageRoot of packages) {
+                candidates.push(path.join(packageRoot, 'bin', 'ffmpeg.exe'));
+                const builds = fs.readdirSync(packageRoot, { withFileTypes: true })
+                    .filter(entry => entry.isDirectory())
+                    .map(entry => path.join(packageRoot, entry.name));
+                for (const buildRoot of builds) {
+                    candidates.push(path.join(buildRoot, 'bin', 'ffmpeg.exe'));
+                }
+            }
+        } catch (error) { }
+    }
+
+    candidates.push(
+        path.join(process.env.LOCALAPPDATA || '', 'ffmpeg', 'bin', 'ffmpeg.exe'),
+        path.join(process.env.ProgramFiles || '', 'ffmpeg', 'bin', 'ffmpeg.exe'),
+        path.join(process.env.ProgramFiles || '', 'FFmpeg', 'bin', 'ffmpeg.exe')
+    );
+
+    return uniquePaths(candidates)
+        .sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
 function nvmNodeCandidates() {
     const candidates = [];
     const addVersionedNodes = (root, executable) => {
@@ -277,7 +313,8 @@ function npmCommandForNode(nodeCommand) {
 
 function pathCandidates(config, key, fallbackNames) {
     const configured = [config[key], config[`${key}_mac`], config[`${key}_win`], config[`${key}_linux`]];
-    return [...configured, ...fallbackNames].filter(Boolean).map(candidate => {
+    const dynamic = key === 'ffmpeg_path' ? windowsFfmpegCandidates() : [];
+    return [...configured, ...dynamic, ...fallbackNames].filter(Boolean).map(candidate => {
         const expanded = expandPath(candidate);
         if (expanded.includes('/') || expanded.includes('\\')) {
             return path.isAbsolute(expanded) ? expanded : path.resolve(runtimeDir(), expanded);
@@ -386,6 +423,33 @@ async function checkRequirements() {
             command: playwrightPath
         }
     ];
+}
+
+function persistDetectedToolPaths(config, requirements) {
+    let changed = false;
+    const platformSuffix = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
+    for (const [id, configKey] of [['node', 'node_path'], ['ytdlp', 'ytdl_path'], ['ffmpeg', 'ffmpeg_path']]) {
+        const requirement = requirements.find(item => item.id === id);
+        if (!requirement?.command) continue;
+        const platformKey = `${configKey}_${platformSuffix}`;
+        if (config[configKey] !== requirement.command) {
+            config[configKey] = requirement.command;
+            changed = true;
+        }
+        if (config[platformKey] !== requirement.command) {
+            config[platformKey] = requirement.command;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+async function repairRequirementPaths() {
+    const config = readConfig();
+    const requirements = await checkRequirements();
+    const changed = persistDetectedToolPaths(config, requirements);
+    if (changed) writeConfig(config);
+    return { requirements, changed };
 }
 
 function runCommand(command, args, options = {}) {
@@ -621,6 +685,11 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         throw new Error(`ยังขาด requirement: ${missing.map(item => item.label).join(', ')}`);
     }
 
+    // Persist the executable selected by the requirement check. This prevents
+    // a stale WinGet path such as ffmpeg-8.1.1 from being reused after the
+    // package was upgraded to another version.
+    if (persistDetectedToolPaths(config, requirements)) writeConfig(config);
+
     const node = requirements.find(item => item.id === 'node');
     serviceOutputBuffer = '';
     serviceErrorBuffer = '';
@@ -757,8 +826,17 @@ ipcMain.handle('requirements:check', async () => checkRequirements());
 ipcMain.handle('requirements:download', async (_event, id) => {
     try {
         const result = await downloadRequirement(id);
-        const requirements = await checkRequirements();
-        send('requirements:update', requirements);
+        const repaired = await repairRequirementPaths();
+        send('requirements:update', repaired.requirements);
+        return { ok: true, ...result, pathRepaired: repaired.changed };
+    } catch (error) {
+        return { ok: false, message: error.message };
+    }
+});
+ipcMain.handle('requirements:repair', async () => {
+    try {
+        const result = await repairRequirementPaths();
+        send('requirements:update', result.requirements);
         return { ok: true, ...result };
     } catch (error) {
         return { ok: false, message: error.message };
