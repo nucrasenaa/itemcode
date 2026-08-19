@@ -1655,6 +1655,11 @@ function isYoutubeChannel(url) {
     return hasChannelMarker && !hasVideoMarker;
 }
 
+function isDirectUrlExpired(url, graceSeconds = 120) {
+    const match = String(url || '').match(/(?:expire[=/])(\d{9,})/i);
+    return Boolean(match && Number(match[1]) <= Math.floor(Date.now() / 1000) + graceSeconds);
+}
+
 // Helper to construct yt-dlp arguments with cookie options
 function detectYtdlBrowserCookieSource() {
     if (process.platform === 'darwin') {
@@ -1840,8 +1845,8 @@ async function captureFrame(directUrl, outputPath) {
                 error.code ? `code=${error.code}` : '',
                 error.signal ? `signal=${error.signal}` : '',
                 error.killed ? 'killed=true' : '',
-                error.stderr ? String(error.stderr).trim() : '',
-                error.message ? String(error.message).trim() : ''
+                error.stderr ? `stderr=${String(error.stderr).trim()}` : '',
+                error.stdout ? `stdout=${String(error.stdout).trim()}` : ''
             ].filter(Boolean).join(' | ').replace(/\s+/g, ' ').slice(-900);
             attemptDiagnostics.push(`attempt ${attempt + 1}: ${errorDetail || 'ไม่ทราบข้อผิดพลาด'}`);
             if (attempt < commandVariants.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
@@ -2185,6 +2190,12 @@ async function scanStreamLoop(videoUrl) {
                 await sleep(10000);
                 continue;
             }
+        }
+
+        if (isDirectUrlExpired(cachedDirectUrl)) {
+            log('[yt-dlp] ลิงก์ HLS หมดอายุแล้ว กำลังดึงลิงก์ใหม่');
+            cachedDirectUrl = null;
+            continue;
         }
 
         // Process one frame capture + OCR

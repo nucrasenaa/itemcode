@@ -458,11 +458,17 @@ function runCommand(command, args, options = {}) {
         if (!command || !fs.existsSync(cwd)) {
             return reject(new Error(`ไม่สามารถเริ่มคำสั่งได้: command=${command || '(ว่าง)'} cwd=${cwd}`));
         }
-        const child = spawn(command, args, {
+        const useWindowsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+        // cmd.exe splits an unquoted path such as `C:\Program Files\...` at
+        // the space when shell mode is used.
+        const spawnCommand = useWindowsShell && !/^".*"$/.test(command)
+            ? `"${command}"`
+            : command;
+        const child = spawn(spawnCommand, args, {
             cwd,
             env: { ...process.env, ...(options.env || {}) },
             windowsHide: true,
-            shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
+            shell: useWindowsShell,
             stdio: ['ignore', 'pipe', 'pipe']
         });
         let output = '';
@@ -568,11 +574,23 @@ async function downloadRequirement(id) {
         fs.mkdirSync(browserPath, { recursive: true });
         let playwrightCli = path.join(runtime, 'node_modules', 'playwright', 'cli.js');
         if (!fs.existsSync(playwrightCli)) {
-            const npmCommand = npmCommandForNode(node.command);
-            await runCommand(npmCommand, ['install', '--omit=dev'], {
-                cwd: runtime,
-                onOutput: output => send('requirements:progress', { id, text: output.slice(-500) })
-            });
+            // Packaged builds already contain the service dependencies. Copy
+            // them into the writable runtime first so an upgrade does not
+            // depend on a broken npm bundled with an nvm installation.
+            const bundledModules = app.isPackaged
+                ? path.join(process.resourcesPath, 'equality-itemcode-version', 'node_modules')
+                : '';
+            const bundledPlaywright = path.join(bundledModules, 'playwright', 'cli.js');
+            if (bundledModules && fs.existsSync(bundledPlaywright)) {
+                fs.mkdirSync(path.join(runtime, 'node_modules'), { recursive: true });
+                fs.cpSync(bundledModules, path.join(runtime, 'node_modules'), { recursive: true, force: true });
+            } else {
+                const npmCommand = npmCommandForNode(node.command);
+                await runCommand(npmCommand, ['install', '--omit=dev'], {
+                    cwd: runtime,
+                    onOutput: output => send('requirements:progress', { id, text: output.slice(-500) })
+                });
+            }
             playwrightCli = path.join(runtime, 'node_modules', 'playwright', 'cli.js');
         }
         if (!fs.existsSync(playwrightCli)) {
