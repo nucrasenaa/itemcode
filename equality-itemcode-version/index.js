@@ -29,6 +29,9 @@ let accessToken = null;
 let currentLoggedInUser = null;
 let isAutoLoginDisabled = false;
 let hasNotifiedTokenExpired = false;
+let autoLoginPromise = null;
+let lastAutoLoginAttemptAt = 0;
+const AUTO_LOGIN_RETRY_INTERVAL_MS = 30000;
 let lastPeriodicSleepTime = Date.now();
 const discordDestinationCache = new Map();
 const discordNotificationCache = new Map();
@@ -353,8 +356,8 @@ function saveSession(token, username = "") {
 async function notifyTokenExpired() {
     if (hasNotifiedTokenExpired) return;
     hasNotifiedTokenExpired = true;
-    const msg = `⚠️ *[TalesRunner Watcher Alert]*\n\n🔒 *Access Token หมดอายุแล้ว!*\n\nระบบไม่สามารถทำการเคลมโค้ดไอเทมอัตโนมัติได้ กรุณาล็อกอินผ่านเบราว์เซอร์แล้วนำ Bearer Token ใหม่มาตั้งค่าด้วยคำสั่ง:\n\`node index.js --set-token <YOUR_BEARER_TOKEN>\``;
-    log(`[!] ส่งการแจ้งเตือน Telegram: Token หมดอายุแล้ว`);
+    const msg = `⚠️ *[TalesRunner Watcher Alert]*\n\n🔒 *Access Token หมดอายุแล้ว!*\n\nระบบกำลังเข้าสู่ flow login ใหม่อัตโนมัติจากต้นทาง หาก login สำเร็จจะทำงานต่อทันทีโดยไม่ต้องกด Start/Stop\n\nหากยังไม่สำเร็จ ระบบจะลองใหม่อัตโนมัติเป็นระยะ`;
+    log(`[!] ส่งการแจ้งเตือน Telegram: Token หมดอายุแล้ว กำลัง login ใหม่อัตโนมัติ`);
     await sendTelegram(msg);
 }
 
@@ -713,6 +716,52 @@ async function loginWithBrowserForAccessToken(username, password, options = {}) 
     }
 }
 
+async function loginFromBeginning(username = config.username, password = config.password, options = {}) {
+    username = username || config.username || '';
+    password = password || config.password || '';
+    if (!username || !password) return false;
+
+    if (autoLoginPromise) return autoLoginPromise;
+    const now = Date.now();
+    if (!options.force && lastAutoLoginAttemptAt && now - lastAutoLoginAttemptAt < AUTO_LOGIN_RETRY_INTERVAL_MS) {
+        return false;
+    }
+
+    lastAutoLoginAttemptAt = now;
+    autoLoginPromise = (async () => {
+        accessToken = null;
+        currentLoggedInUser = null;
+        isAutoLoginDisabled = false;
+        log(`[AUTO-LOGIN] เริ่ม flow login ใหม่ตั้งแต่ต้นสำหรับบัญชี ${username}`);
+
+        let success = false;
+        if (config.browser_token_login_enabled !== false) {
+            log(`[AUTO-LOGIN] กำลัง login ผ่าน Browser เพื่อรับ Access Token ใหม่...`);
+            success = await loginWithBrowserForAccessToken(username, password);
+        }
+        if (!success) {
+            log(`[AUTO-LOGIN] Browser login ไม่สำเร็จ กำลังใช้ OAuth PKCE เป็น fallback...`);
+            success = await loginWithCredentials(username, password);
+        }
+
+        if (success) {
+            isAutoLoginDisabled = false;
+            hasNotifiedTokenExpired = false;
+            lastAutoLoginAttemptAt = 0;
+            log(`[AUTO-LOGIN] login ใหม่สำเร็จ ทำงานต่อโดยไม่ต้องกด Start/Stop`);
+            return true;
+        }
+
+        isAutoLoginDisabled = true;
+        log(`[AUTO-LOGIN] login ใหม่ยังไม่สำเร็จ ระบบจะลองใหม่อีกครั้งอัตโนมัติ`);
+        return false;
+    })().finally(() => {
+        autoLoginPromise = null;
+    });
+
+    return autoLoginPromise;
+}
+
 // Exchange auth code with verifier for a Bearer Access Token
 async function exchangeCodeWithVerifier(authCode, codeVerifier) {
     const tokenUrl = `${PASSPORT_BASE_URL}/oauth/token`;
@@ -930,15 +979,11 @@ async function redeemCodeInner(serial, username = null, password = null) {
     const targetPassword = password || config.password || "";
 
     if (!accessToken) {
-        if (!isAutoLoginDisabled) {
-            log(`[*] Node: ไม่มี Token ในระบบ กำลังพยายามเข้าสู่ระบบ...`);
-            const success = await loginWithCredentials(targetUsername, targetPassword);
-            if (!success) {
-                isAutoLoginDisabled = true;
-                return { success: false, message: "ไม่มี Access Token ที่ใช้งานได้ (โปรดอัปเดต Token ด้วย --set-token)" };
-            }
-        } else {
-            return { success: false, message: "ไม่มี Access Token ที่ใช้งานได้" };
+        log(`[*] Node: ไม่มี Token ในระบบ กำลังเริ่ม flow login ใหม่อัตโนมัติ...`);
+        const success = await loginFromBeginning(targetUsername, targetPassword);
+        if (!success) {
+            await notifyTokenExpired();
+            return { success: false, message: "ไม่มี Access Token ที่ใช้งานได้ ระบบจะลอง login ใหม่อัตโนมัติ" };
         }
     }
 
@@ -977,29 +1022,29 @@ async function redeemCodeInner(serial, username = null, password = null) {
         // Auto re-authenticate on 401 Unauthorized
         if (responseCheck.status === 401) {
             log(`[!] Node: พบสถานะ 401 (Unauthorized Token หมดอายุ)`);
-            await notifyTokenExpired();
-            if (!isAutoLoginDisabled) {
-                const success = await loginWithCredentials(targetUsername, targetPassword);
-                if (success) {
-                    log(`[+] Node: ออโต้ล็อกอินสำเร็จ! กำลังทดลองส่งโค้ดใหม่อีกครั้ง...`);
-                    headers['Authorization'] = `Bearer ${accessToken}`;
-                    // Retry Step 1
-                    try {
-                        await fetch(pendingUrl, { headers });
-                    } catch (e) { }
-                    // Retry Step 2
-                    responseCheck = await fetch(checkUrl, {
-                        method: 'POST',
-                        headers: headers,
-                        body: JSON.stringify(payloadCheck)
-                    });
-                } else {
-                    isAutoLoginDisabled = true;
-                    return { success: false, checkSuccess: false, message: "Unauthorized (Token หมดอายุ)" };
-                }
+            const success = await loginFromBeginning(targetUsername, targetPassword);
+            if (success) {
+                log(`[+] Node: ออโต้ล็อกอินใหม่สำเร็จ! กำลังทดลองส่งโค้ดใหม่อีกครั้ง...`);
+                headers['Authorization'] = `Bearer ${accessToken}`;
+                // Retry Step 1
+                try {
+                    await fetch(pendingUrl, { headers });
+                } catch (e) { }
+                // Retry Step 2
+                responseCheck = await fetch(checkUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(payloadCheck)
+                });
             } else {
-                return { success: false, checkSuccess: false, message: "Unauthorized (Token หมดอายุ)" };
+                await notifyTokenExpired();
+                return { success: false, checkSuccess: false, message: "Unauthorized (Token หมดอายุ) ระบบกำลังลอง login ใหม่อัตโนมัติ" };
             }
+        }
+
+        if (responseCheck.status === 401) {
+            await notifyTokenExpired();
+            return { success: false, checkSuccess: false, message: "Unauthorized หลัง login ใหม่อัตโนมัติ" };
         }
 
         const parsedCheck = await readApiResponse(responseCheck);
@@ -2430,24 +2475,13 @@ async function main() {
         }
     }
 
-    // 2. Auto login if no valid session token exists and credentials provided
+    // 2. Auto login from the beginning if no valid session token exists.
     if (!primaryLoginSuccess && config.username && config.password) {
-        if (config.browser_token_login_enabled !== false) {
-            log(`[*] พบข้อมูลล็อกอินในค่าตั้งค่า กำลัง login ผ่าน Browser เพื่อดึง access_token...`);
-            primaryLoginSuccess = await loginWithBrowserForAccessToken(config.username, config.password);
-        }
-
-        if (!primaryLoginSuccess) {
-            log(`[*] กำลังใช้ OAuth PKCE login เป็น fallback...`);
-            primaryLoginSuccess = await loginWithCredentials(config.username, config.password);
-        }
-
+        primaryLoginSuccess = await loginFromBeginning(config.username, config.password, { force: true });
         if (primaryLoginSuccess) {
             log(`[+] เชื่อมต่อบัญชีผู้ใช้ HOF สำเร็จ! (${config.username}) ระบบจะทำการเคลมโค้ดอัตโนมัติ`);
         } else {
-            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้ทั้ง Browser login และ OAuth PKCE`);
-            log(`[💡] คำแนะนำ: กรุณาล็อกอินผ่านเบราว์เซอร์ แล้วนำ Bearer Token มาตั้งค่าด้วยคำสั่ง:`);
-            log(`     node index.js --set-token <YOUR_BEARER_TOKEN>`);
+            log(`[-] ไม่สามารถเชื่อมต่อบัญชี HOF ได้ ระบบจะลอง login ใหม่อัตโนมัติเป็นระยะ`);
             await notifyTokenExpired();
         }
     } else if (!primaryLoginSuccess) {

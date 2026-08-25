@@ -22,11 +22,11 @@
   "history_file": "ocr_history.json",
 
   // ตำแหน่งโปรแกรมภายนอก แยกตามระบบปฏิบัติการ
-  "ytdl_path_mac": "/opt/homebrew/bin/yt-dlp",
-  "ytdl_path_win": "%LOCALAPPDATA%\\Programs\\Python\\Python311\\Scripts\\yt-dlp.exe",
+  "ytdl_path_mac": "yt-dlp",
+  "ytdl_path_win": "yt-dlp.exe",
   "ytdl_path_linux": "yt-dlp",
-  "ffmpeg_path_mac": "/opt/homebrew/bin/ffmpeg",
-  "ffmpeg_path_win": "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe",
+  "ffmpeg_path_mac": "ffmpeg",
+  "ffmpeg_path_win": "ffmpeg.exe",
   "ffmpeg_path_linux": "ffmpeg",
   "ocr_helper_path_mac": "./ocr_helper",
   "ocr_helper_path_win": "%USERPROFILE%\\Documents\\equality-itemcode-version\\ocr_helper.ps1",

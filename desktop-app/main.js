@@ -194,7 +194,7 @@ function send(channel, payload) {
 
 function runVersion(command, args = ['--version']) {
     return new Promise(resolve => {
-        execFile(command, args, { timeout: 5000, windowsHide: true }, (error, stdout, stderr) => {
+        execFile(command, args, { timeout: 5000, windowsHide: true, env: toolEnvironment() }, (error, stdout, stderr) => {
             const output = String(stdout || stderr || '').trim();
             resolve({
                 ok: !error,
@@ -207,15 +207,150 @@ function runVersion(command, args = ['--version']) {
 
 async function findWorkingCommand(candidates, args = ['--version']) {
     for (const candidate of candidates.filter(Boolean)) {
-        const expanded = expandPath(candidate);
-        const result = await runVersion(expanded, args);
-        if (result.ok) return { command: expanded, ...result };
+        const resolved = resolveExecutable(candidate);
+        const result = await runVersion(resolved, args);
+        if (result.ok) return { command: resolved, ...result };
     }
     return null;
 }
 
 function uniquePaths(values) {
     return [...new Set(values.filter(Boolean))];
+}
+
+function childDirectoryNames(root) {
+    if (!root || !fs.existsSync(root)) return [];
+    try {
+        return fs.readdirSync(root, { withFileTypes: true })
+            .filter(entry => entry.isDirectory())
+            .map(entry => entry.name);
+    } catch (error) {
+        return [];
+    }
+}
+
+function macNodeVersionDirectories() {
+    if (process.platform !== 'darwin') return [];
+    const home = os.homedir();
+    const nvmRoot = path.join(home, '.nvm', 'versions', 'node');
+    const fnmRoots = [
+        path.join(home, 'Library', 'Application Support', 'fnm', 'node-versions'),
+        path.join(home, '.local', 'share', 'fnm', 'node-versions'),
+        path.join(home, '.fnm', 'node-versions')
+    ];
+    const directories = childDirectoryNames(nvmRoot)
+        .map(version => path.join(nvmRoot, version, 'bin'));
+    for (const root of fnmRoots) {
+        for (const version of childDirectoryNames(root)) {
+            directories.push(path.join(root, version, 'installation', 'bin'));
+        }
+    }
+    return uniquePaths(directories);
+}
+
+function macPythonScriptDirectories() {
+    if (process.platform !== 'darwin') return [];
+    const pythonRoot = path.join(os.homedir(), 'Library', 'Python');
+    return childDirectoryNames(pythonRoot)
+        .filter(version => /^\d+(\.\d+)?$/.test(version))
+        .map(version => path.join(pythonRoot, version, 'bin'));
+}
+
+function macExecutableDirectories() {
+    if (process.platform !== 'darwin') return [];
+    const home = os.homedir();
+    return uniquePaths([
+        '/opt/homebrew/bin',
+        '/opt/homebrew/sbin',
+        '/usr/local/bin',
+        '/usr/local/sbin',
+        '/opt/local/bin',
+        path.join(home, 'bin'),
+        path.join(home, '.local', 'bin'),
+        path.join(home, '.volta', 'bin'),
+        path.join(home, '.asdf', 'shims'),
+        path.join(home, '.pyenv', 'shims'),
+        path.join(home, 'Library', 'pnpm'),
+        ...macNodeVersionDirectories(),
+        ...macPythonScriptDirectories()
+    ]);
+}
+
+function macHomebrewFormulaCandidates(formula, binary) {
+    if (process.platform !== 'darwin') return [];
+    const candidates = [];
+    for (const cellarRoot of [
+        path.join('/opt/homebrew', 'Cellar', formula),
+        path.join('/usr/local', 'Cellar', formula)
+    ]) {
+        for (const version of childDirectoryNames(cellarRoot)) {
+            candidates.push(path.join(cellarRoot, version, 'bin', binary));
+        }
+    }
+    return candidates;
+}
+
+function macToolCandidates(tool) {
+    if (process.platform !== 'darwin') return [];
+    const home = os.homedir();
+    const candidates = macExecutableDirectories().map(directory => path.join(directory, tool));
+
+    if (tool === 'node') {
+        candidates.push(
+            ...nvmNodeCandidates(),
+            ...(process.env.NVM_BIN ? [path.join(expandPath(process.env.NVM_BIN), 'node')] : []),
+            ...macHomebrewFormulaCandidates('node', 'node')
+        );
+    }
+    if (tool === 'yt-dlp') {
+        candidates.push(
+            path.join(appDataDir(), 'tools', 'yt-dlp'),
+            path.join(home, '.local', 'pipx', 'venvs', 'yt-dlp', 'bin', 'yt-dlp'),
+            path.join(home, '.local', 'share', 'pipx', 'venvs', 'yt-dlp', 'bin', 'yt-dlp'),
+            path.join(home, 'Library', 'Application Support', 'pipx', 'venvs', 'yt-dlp', 'bin', 'yt-dlp'),
+            path.join('/opt/homebrew', 'opt', 'yt-dlp', 'bin', 'yt-dlp'),
+            path.join('/usr/local', 'opt', 'yt-dlp', 'bin', 'yt-dlp'),
+            ...macHomebrewFormulaCandidates('yt-dlp', 'yt-dlp')
+        );
+    }
+    if (tool === 'ffmpeg') {
+        candidates.push(
+            path.join(appDataDir(), 'tools', 'ffmpeg'),
+            path.join('/opt/homebrew', 'opt', 'ffmpeg', 'bin', 'ffmpeg'),
+            path.join('/usr/local', 'opt', 'ffmpeg', 'bin', 'ffmpeg'),
+            path.join('/opt/local', 'bin', 'ffmpeg'),
+            ...macHomebrewFormulaCandidates('ffmpeg', 'ffmpeg')
+        );
+    }
+    if (tool === 'brew') {
+        candidates.push(
+            process.env.HOMEBREW_PREFIX ? path.join(expandPath(process.env.HOMEBREW_PREFIX), 'bin', 'brew') : '',
+            'brew'
+        );
+    }
+    return uniquePaths(candidates);
+}
+
+function resolveExecutable(command) {
+    const expanded = expandPath(command);
+    if (!expanded || path.isAbsolute(expanded) || expanded.includes('/') || expanded.includes('\\')) {
+        return expanded;
+    }
+    if (process.platform === 'darwin') {
+        const candidate = macToolCandidates(expanded).find(file => fs.existsSync(file));
+        if (candidate) return candidate;
+    }
+    return expanded;
+}
+
+function toolEnvironment(overrides = {}) {
+    const currentPath = String(process.env.PATH || '').split(path.delimiter);
+    const extraPath = process.platform === 'darwin' ? macExecutableDirectories() : [];
+    return {
+        ...process.env,
+        PATH: uniquePaths([...currentPath, ...extraPath]).join(path.delimiter),
+        ...overrides
+    };
 }
 
 function windowsFfmpegCandidates() {
@@ -286,16 +421,18 @@ function nodeCommandCandidates() {
         : ['node'];
     // Put nvm paths first so a GUI launched outside the shell still finds the
     // same Node.js installation used by the user's terminal.
-    return uniquePaths([...nvmNodeCandidates(), ...systemCandidates]);
+    const macCandidates = process.platform === 'darwin' ? macToolCandidates('node') : [];
+    return uniquePaths([...macCandidates, ...nvmNodeCandidates(), ...systemCandidates]);
 }
 
 async function findNodeCommand(candidates = nodeCommandCandidates()) {
     let fallback = null;
     for (const candidate of candidates) {
-        const result = await runVersion(expandPath(candidate));
+        const resolved = resolveExecutable(candidate);
+        const result = await runVersion(resolved);
         if (!result.ok) continue;
         const major = Number(result.output.match(/v(\d+)/i)?.[1] || 0);
-        const found = { command: expandPath(candidate), ...result, major };
+        const found = { command: resolved, ...result, major };
         if (major >= 20) return found;
         fallback ||= found;
     }
@@ -313,7 +450,11 @@ function npmCommandForNode(nodeCommand) {
 
 function pathCandidates(config, key, fallbackNames) {
     const configured = [config[key], config[`${key}_mac`], config[`${key}_win`], config[`${key}_linux`]];
-    const dynamic = key === 'ffmpeg_path' ? windowsFfmpegCandidates() : [];
+    const dynamic = key === 'ffmpeg_path'
+        ? (process.platform === 'win32' ? windowsFfmpegCandidates() : macToolCandidates('ffmpeg'))
+        : key === 'ytdl_path' && process.platform === 'darwin'
+            ? macToolCandidates('yt-dlp')
+            : [];
     return [...configured, ...dynamic, ...fallbackNames].filter(Boolean).map(candidate => {
         const expanded = expandPath(candidate);
         if (expanded.includes('/') || expanded.includes('\\')) {
@@ -379,7 +520,7 @@ async function checkRequirements() {
             ready: nodeReady,
             version: node?.output || '',
             detail: nodeReady
-                ? `${node.command.includes('.nvm') || node.command.includes('\\nvm\\') ? 'พร้อมใช้งานจาก nvm' : 'พร้อมใช้งาน'}`
+                ? `${node.command.includes('.nvm') || node.command.includes('\\nvm\\') ? 'พร้อมใช้งานจาก nvm' : 'พร้อมใช้งาน'}: ${node.command}`
                 : node
                     ? `พบ ${node.output} แต่ต้องใช้เวอร์ชัน 20 ขึ้นไป`
                     : 'ยังไม่พบ Node.js ใน PATH หรือ nvm',
@@ -391,7 +532,7 @@ async function checkRequirements() {
             label: 'yt-dlp',
             ready: Boolean(ytdlp),
             version: ytdlp?.output || '',
-            detail: ytdlp ? 'พร้อมใช้งาน' : 'ใช้สำหรับอ่านลิงก์สตรีม',
+            detail: ytdlp ? `พร้อมใช้งาน: ${ytdlp.command}` : 'ใช้สำหรับอ่านลิงก์สตรีม',
             canDownload: true,
             command: ytdlp?.command || ''
         },
@@ -400,7 +541,7 @@ async function checkRequirements() {
             label: 'FFmpeg',
             ready: Boolean(ffmpeg),
             version: ffmpeg?.output || '',
-            detail: ffmpeg ? 'พร้อมใช้งาน' : 'ใช้สำหรับจับภาพจากสตรีม',
+            detail: ffmpeg ? `พร้อมใช้งาน: ${ffmpeg.command}` : 'ใช้สำหรับจับภาพจากสตรีม',
             canDownload: true,
             command: ffmpeg?.command || ''
         },
@@ -466,7 +607,7 @@ function runCommand(command, args, options = {}) {
             : command;
         const child = spawn(spawnCommand, args, {
             cwd,
-            env: { ...process.env, ...(options.env || {}) },
+            env: toolEnvironment(options.env || {}),
             windowsHide: true,
             shell: useWindowsShell,
             stdio: ['ignore', 'pipe', 'pipe']
@@ -520,7 +661,10 @@ async function installWithSystemPackageManager(id, config) {
     if (!packageName) return false;
 
     if (process.platform === 'darwin') {
-        const brew = await findWorkingCommand(['brew'], ['--version']);
+        const brew = await findWorkingCommand(
+            process.platform === 'darwin' ? [...macToolCandidates('brew'), 'brew'] : ['brew'],
+            ['--version']
+        );
         if (!brew) return false;
         await runCommand(brew.command, ['install', packageName], {
             onOutput: output => send('requirements:progress', { id, text: output.slice(-500) })
@@ -561,9 +705,20 @@ async function downloadRequirement(id) {
             : 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
         await downloadFile(url, destination);
         if (process.platform !== 'win32') fs.chmodSync(destination, 0o755);
-        config[process.platform === 'win32' ? 'ytdl_path_win' : 'ytdl_path_mac'] = destination;
+        try {
+            fs.accessSync(destination, fs.constants.R_OK | fs.constants.X_OK);
+        } catch (error) {
+            throw new Error(`ดาวน์โหลด yt-dlp แล้ว แต่ไฟล์ไม่มีสิทธิ์ Execute: ${destination}`);
+        }
+        const verified = await findWorkingCommand([destination]);
+        if (!verified) {
+            const diagnostic = await runVersion(destination);
+            throw new Error(`ดาวน์โหลด yt-dlp แล้ว แต่ไม่สามารถเรียกใช้งานได้: ${diagnostic.error || diagnostic.output || 'ไม่ทราบสาเหตุ'}\nPath: ${destination}`);
+        }
+        config.ytdl_path = verified.command;
+        config[process.platform === 'win32' ? 'ytdl_path_win' : 'ytdl_path_mac'] = verified.command;
         writeConfig(config);
-        return { message: `ดาวน์โหลด yt-dlp แล้ว: ${destination}` };
+        return { message: `ดาวน์โหลด yt-dlp และตั้งค่า Path แล้ว: ${verified.command}`, path: verified.command };
     }
 
     if (id === 'browser') {
@@ -717,12 +872,11 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
     serviceMode = mode;
     serviceProcess = spawn(node.command || (process.platform === 'win32' ? 'node.exe' : 'node'), ['index.js', ...serviceArgs], {
         cwd: runtime,
-        env: {
-            ...process.env,
+        env: toolEnvironment({
             PLAYWRIGHT_BROWSERS_PATH: path.join(appDataDir(), 'playwright-browsers'),
             BROWSER_TOKEN_LOGIN_HEADLESS: 'true',
             BROWSER_REDEEM_HEADLESS: 'true'
-        },
+        }),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -843,7 +997,10 @@ function createWindow() {
     mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-ipcMain.handle('requirements:check', async () => checkRequirements());
+ipcMain.handle('requirements:check', async () => {
+    const result = await repairRequirementPaths();
+    return result.requirements;
+});
 ipcMain.handle('requirements:download', async (_event, id) => {
     try {
         const result = await downloadRequirement(id);
