@@ -1,4 +1,13 @@
 # Credentials & Tokens (Critical)
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.crt
+*.token
 service_config.json
 web_config.json
 .session_config.json
