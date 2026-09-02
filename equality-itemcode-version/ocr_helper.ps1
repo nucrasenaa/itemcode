@@ -51,15 +51,13 @@ try {
     $bitmapTask = $decoder.GetSoftwareBitmapAsync()
     $bitmap = Await-WinRT $bitmapTask ([Windows.Graphics.Imaging.SoftwareBitmap])
     
-    # Perform OCR using user's profile languages (supports Thai/English if installed)
-    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    # ItemCodes are Latin letters and digits. Use only the explicit English OCR
+    # model so accuracy is deterministic and does not depend on Windows profile
+    # languages.
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
+
     if ($null -eq $engine) {
-        # Fallback to default engine (English)
-        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
-    }
-    
-    if ($null -eq $engine) {
-        Write-Error "OCR Engine could not be created."
+        Write-Error "English OCR Engine could not be created. Install the English language/OCR pack in Windows Settings."
         exit 1
     }
     

@@ -44,7 +44,7 @@ if [ "$NODE_INSTALLED" = false ]; then
 fi
 
 echo -e "${YELLOW}[*] 3. Installing FFmpeg, Python 3, and Tesseract OCR...${NC}"
-apt install -y ffmpeg python3 tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng
+apt install -y ffmpeg python3 tesseract-ocr tesseract-ocr-eng
 
 # Install/Update yt-dlp from official Github source to get the absolute latest signatures
 echo -e "${YELLOW}[*] 4. Installing the latest yt-dlp binary...${NC}"
