@@ -44,6 +44,7 @@ let debugLogStarted = false;
 let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
 let updateReady = false;
+let manualInstallAvailable = false;
 
 function showToast(message, error = false) {
     elements.toast.textContent = message;
@@ -67,6 +68,7 @@ function formatBytes(bytes) {
 
 function setUpdateState(state = {}) {
     updateReady = Boolean(state.updateReady || state.state === 'downloaded');
+    manualInstallAvailable = Boolean(state.manualInstallAvailable);
     const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
     const messages = {
         idle: 'เวอร์ชันปัจจุบัน ' + (state.currentVersion || '-'),
@@ -74,7 +76,9 @@ function setUpdateState(state = {}) {
         available: state.message || ('พบเวอร์ชัน ' + (state.version || '') + ' กำลังดาวน์โหลด...'),
         downloading: 'กำลังดาวน์โหลด Update ' + percent.toFixed(0) + '%' +
             (state.total ? ' (' + formatBytes(state.transferred) + ' / ' + formatBytes(state.total) + ')' : ''),
+        verifying: state.message || 'กำลังตรวจสอบไฟล์ Update...',
         downloaded: state.message || ('ดาวน์โหลดเวอร์ชัน ' + (state.version || '') + ' เสร็จแล้ว กดติดตั้งเพื่อเปิดใหม่'),
+        'manual-installing': state.message || 'เปิด DMG แล้ว แอปกำลังปิดเพื่อให้ติดตั้งด้วยการลากเอง',
         'up-to-date': state.message || 'ใช้งานเวอร์ชันล่าสุดแล้ว',
         unavailable: state.message || 'ตรวจสอบ Update ได้จากแอปที่ package แล้วเท่านั้น',
         error: 'ตรวจสอบ Update ไม่สำเร็จ: ' + (state.message || 'เกิดข้อผิดพลาด')
@@ -83,7 +87,10 @@ function setUpdateState(state = {}) {
     elements.updateStatus.classList.toggle('update-error', state.state === 'error');
     elements.updateStatus.classList.toggle('update-ready', updateReady);
     elements.checkUpdate.disabled = state.state === 'checking' || state.state === 'downloading';
-    elements.installUpdate.hidden = !updateReady;
+    elements.installUpdate.hidden = !(updateReady || manualInstallAvailable);
+    elements.installUpdate.textContent = manualInstallAvailable
+        ? 'ดาวน์โหลดและเปิด DMG'
+        : 'ติดตั้งและเปิดใหม่';
     elements.updateProgress.hidden = state.state !== 'downloading';
     elements.updateProgressBar.style.width = percent + '%';
     elements.updateProgressText.textContent = percent.toFixed(0) + '%';
@@ -99,7 +106,7 @@ async function checkForUpdate() {
 }
 
 async function installUpdate() {
-    if (!updateReady) return;
+    if (!updateReady && !manualInstallAvailable) return;
     elements.installUpdate.disabled = true;
     try {
         const result = await api.installUpdate();

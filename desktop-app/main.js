@@ -6,6 +6,7 @@ const {
     shell
 } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -20,6 +21,7 @@ const REQUIREMENT_LINKS = {
     ocr: 'https://github.com/Apple/Vision',
     browser: 'https://playwright.dev/docs/browsers'
 };
+const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/nucrasenaa/itemcode/releases/latest';
 
 function requirementLink(id) {
     if (id === 'ocr' && process.platform === 'win32') {
@@ -37,11 +39,17 @@ let updateCheckInFlight = false;
 let updateReady = false;
 let updateState = 'idle';
 let updateInfo = null;
+let macUpdateAvailable = false;
+let macUpdateDownloadInFlight = false;
 
 // Download updates automatically, then let the user choose when to restart.
 // autoInstallOnAppQuit also covers the case where the user closes the app
 // after the update has finished downloading.
-autoUpdater.autoDownload = true;
+// Squirrel.Mac validates the downloaded application before installing it. An
+// Apple Development-signed app can pass local `codesign` verification while
+// still failing that distribution requirement, so macOS uses the DMG/manual
+// install path below instead of trying to install the ZIP automatically.
+autoUpdater.autoDownload = process.platform !== 'darwin';
 autoUpdater.autoInstallOnAppQuit = true;
 
 function updatePayload(extra = {}) {
@@ -49,6 +57,7 @@ function updatePayload(extra = {}) {
         state: updateState,
         currentVersion: app.getVersion(),
         updateReady,
+        manualInstallAvailable: macUpdateAvailable,
         version: updateInfo?.version || '',
         releaseDate: updateInfo?.releaseDate || '',
         ...extra
@@ -60,6 +69,137 @@ function setUpdateState(state, extra = {}) {
     if (extra.info) updateInfo = extra.info;
     if (state !== 'downloaded') updateReady = false;
     send('update:state', updatePayload(extra));
+}
+
+function versionParts(version) {
+    return String(version || '')
+        .replace(/^[vV]/, '')
+        .split('.')
+        .map(part => Number.parseInt(part, 10) || 0);
+}
+
+function isVersionNewer(latest, current) {
+    const latestParts = versionParts(latest);
+    const currentParts = versionParts(current);
+    for (let index = 0; index < Math.max(latestParts.length, currentParts.length); index += 1) {
+        const latestPart = latestParts[index] || 0;
+        const currentPart = currentParts[index] || 0;
+        if (latestPart !== currentPart) return latestPart > currentPart;
+    }
+    return false;
+}
+
+async function checkForMacDMGUpdate() {
+    const response = await fetch(GITHUB_LATEST_RELEASE_URL, {
+        headers: {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'itemcode-desktop-updater'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`GitHub returned HTTP ${response.status} while checking for updates`);
+    }
+
+    const release = await response.json();
+    const latestVersion = String(release.tag_name || '').replace(/^[vV]/, '');
+    if (!latestVersion || !isVersionNewer(latestVersion, app.getVersion())) {
+        macUpdateAvailable = false;
+        updateInfo = null;
+        setUpdateState('up-to-date', { message: 'ใช้งานเวอร์ชันล่าสุดแล้ว' });
+        return updatePayload();
+    }
+
+    const architecture = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const dmgAsset = assets.find(asset => new RegExp(`-${architecture}\\.dmg$`, 'i').test(asset.name || ''))
+        || assets.find(asset => /\\.dmg$/i.test(asset.name || ''));
+    if (!dmgAsset?.browser_download_url) {
+        throw new Error(`ไม่พบ DMG สำหรับ macOS ${architecture} ใน release ${latestVersion}`);
+    }
+
+    updateInfo = {
+        version: latestVersion,
+        releaseDate: release.published_at || release.created_at || '',
+        packageName: dmgAsset.name,
+        packageUrl: dmgAsset.browser_download_url,
+        expectedDigest: dmgAsset.digest || '',
+        releaseUrl: release.html_url || ''
+    };
+    macUpdateAvailable = true;
+    setUpdateState('available', {
+        info: updateInfo,
+        manualInstallAvailable: true,
+        message: `พบเวอร์ชัน ${latestVersion} กดดาวน์โหลดและเปิด DMG เพื่ออัปเดต`
+    });
+    return updatePayload();
+}
+
+function fileDigest(filePath, algorithm) {
+    return new Promise((resolve, reject) => {
+        const hash = crypto.createHash(algorithm);
+        const input = fs.createReadStream(filePath);
+        input.on('data', chunk => hash.update(chunk));
+        input.once('error', reject);
+        input.once('end', () => resolve(hash.digest('hex')));
+    });
+}
+
+async function verifyDownloadedDigest(filePath, expectedDigest) {
+    if (!expectedDigest) return;
+    const separator = expectedDigest.indexOf(':');
+    const algorithm = separator === -1 ? 'sha256' : expectedDigest.slice(0, separator);
+    const expected = separator === -1 ? expectedDigest : expectedDigest.slice(separator + 1);
+    if (!/^(sha256|sha512)$/i.test(algorithm) || !/^[a-f0-9]+$/i.test(expected)) {
+        throw new Error('รูปแบบ checksum ของ DMG ไม่ถูกต้อง');
+    }
+    const actual = await fileDigest(filePath, algorithm.toLowerCase());
+    if (actual.toLowerCase() !== expected.toLowerCase()) {
+        throw new Error(`ตรวจสอบ checksum ของ DMG ไม่ผ่าน (expected ${expected}, got ${actual})`);
+    }
+}
+
+async function downloadAndOpenMacDMG() {
+    if (macUpdateDownloadInFlight) return updatePayload();
+    if (!macUpdateAvailable || !updateInfo?.packageUrl) {
+        return { ok: false, message: 'ยังไม่มี DMG Update ให้ดาวน์โหลด' };
+    }
+
+    macUpdateDownloadInFlight = true;
+    const update = updateInfo;
+    const safeName = String(update.packageName || `Equality-ItemCode-Watcher-${update.version}.dmg`)
+        .replace(/[^a-zA-Z0-9._-]+/g, '-');
+    const destination = path.join(app.getPath('downloads'), safeName);
+    try {
+        setUpdateState('downloading', { message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...` });
+        await downloadFile(update.packageUrl, destination, 0, ({ transferred, total }) => {
+            const percent = total > 0 ? (transferred / total) * 100 : 0;
+            setUpdateState('downloading', {
+                percent,
+                transferred,
+                total,
+                message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...`
+            });
+        });
+        setUpdateState('verifying', { message: 'กำลังตรวจสอบไฟล์ DMG...' });
+        await verifyDownloadedDigest(destination, update.expectedDigest);
+
+        const openError = await shell.openPath(destination);
+        if (openError) throw new Error(`เปิด DMG ไม่สำเร็จ: ${openError}`);
+
+        macUpdateAvailable = false;
+        updateReady = false;
+        setUpdateState('manual-installing', {
+            message: `เปิด DMG เวอร์ชัน ${update.version} แล้ว แอปจะปิด ให้ลากแอปไปที่ Applications แล้วเปิดใหม่`
+        });
+        await stopService();
+        setTimeout(() => app.quit(), 800);
+        return { ok: true, path: destination, message: 'เปิด DMG แล้ว แอปกำลังปิดเพื่อให้ติดตั้งด้วยการลากเอง' };
+    } catch (error) {
+        setUpdateState('error', { message: error.message });
+        return { ok: false, message: error.message };
+    } finally {
+        macUpdateDownloadInFlight = false;
+    }
 }
 
 async function checkForUpdates() {
@@ -80,6 +220,9 @@ async function checkForUpdates() {
     updateCheckInFlight = true;
     setUpdateState('checking');
     try {
+        if (process.platform === 'darwin') {
+            return await checkForMacDMGUpdate();
+        }
         await autoUpdater.checkForUpdates();
         return updatePayload();
     } catch (error) {
@@ -717,14 +860,14 @@ function runCommand(command, args, options = {}) {
     });
 }
 
-function downloadFile(url, destination, redirects = 0) {
+function downloadFile(url, destination, redirects = 0, onProgress = null) {
     return new Promise((resolve, reject) => {
         if (redirects > 5) return reject(new Error('ดาวน์โหลดถูก redirect มากเกินไป'));
         const client = url.startsWith('https:') ? require('https') : require('http');
         const request = client.get(url, response => {
             if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
                 response.resume();
-                return resolve(downloadFile(new URL(response.headers.location, url).toString(), destination, redirects + 1));
+                return resolve(downloadFile(new URL(response.headers.location, url).toString(), destination, redirects + 1, onProgress));
             }
             if (response.statusCode !== 200) {
                 response.resume();
@@ -732,6 +875,12 @@ function downloadFile(url, destination, redirects = 0) {
             }
             fs.mkdirSync(path.dirname(destination), { recursive: true });
             const output = fs.createWriteStream(destination);
+            const total = Number.parseInt(response.headers['content-length'] || '0', 10) || 0;
+            let transferred = 0;
+            response.on('data', chunk => {
+                transferred += chunk.length;
+                if (onProgress) onProgress({ transferred, total });
+            });
             response.pipe(output);
             output.once('finish', () => output.close(resolve));
             output.once('error', error => {
@@ -1160,6 +1309,9 @@ ipcMain.handle('service:state', () => ({ running: Boolean(serviceProcess), mode:
 ipcMain.handle('update:status', () => updatePayload());
 ipcMain.handle('update:check', () => checkForUpdates());
 ipcMain.handle('update:install', async () => {
+    if (process.platform === 'darwin') {
+        return downloadAndOpenMacDMG();
+    }
     if (!updateReady) {
         return { ok: false, message: 'ยังไม่มี Update ที่ดาวน์โหลดเสร็จ' };
     }
