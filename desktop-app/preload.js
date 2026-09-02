@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
     getServiceState: () => ipcRenderer.invoke('service:state'),
     getUpdateStatus: () => ipcRenderer.invoke('update:status'),
     checkForUpdate: () => ipcRenderer.invoke('update:check'),
-    installUpdate: () => ipcRenderer.invoke('update:install'),
     onRequirementsUpdate: (callback) => {
         const listener = (_event, requirements) => callback(requirements);
         ipcRenderer.on('requirements:update', listener);
@@ -41,5 +40,10 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
         const listener = (_event, state) => callback(state);
         ipcRenderer.on('update:state', listener);
         return () => ipcRenderer.removeListener('update:state', listener);
+    },
+    onUpdateNotification: (callback) => {
+        const listener = (_event, notification) => callback(notification);
+        ipcRenderer.on('update:notification', listener);
+        return () => ipcRenderer.removeListener('update:notification', listener);
     }
 });

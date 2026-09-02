@@ -15,11 +15,6 @@ const elements = {
     testTelegram: document.getElementById('testTelegram'),
     testDiscord: document.getElementById('testDiscord'),
     checkUpdate: document.getElementById('checkUpdate'),
-    installUpdate: document.getElementById('installUpdate'),
-    updateStatus: document.getElementById('updateStatus'),
-    updateProgress: document.getElementById('updateProgress'),
-    updateProgressBar: document.getElementById('updateProgressBar'),
-    updateProgressText: document.getElementById('updateProgressText'),
     openChangelog: document.getElementById('openChangelog'),
     changelogModal: document.getElementById('changelogModal'),
     closeChangelog: document.getElementById('closeChangelog'),
@@ -46,8 +41,6 @@ let toastTimer = null;
 let debugLogStarted = false;
 let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
-let updateReady = false;
-let manualInstallAvailable = false;
 let draggedAccountIndex = null;
 let lastRequirementsReady = null;
 
@@ -69,46 +62,10 @@ function showToast(message, error = false) {
     toastTimer = setTimeout(() => elements.toast.classList.remove('show'), 4200);
 }
 
-function formatBytes(bytes) {
-    if (!bytes) return '';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-        value /= 1024;
-        unit += 1;
-    }
-    return value.toFixed(unit === 0 ? 0 : 1) + ' ' + units[unit];
-}
-
 function setUpdateState(state = {}) {
-    updateReady = Boolean(state.updateReady || state.state === 'downloaded');
-    manualInstallAvailable = Boolean(state.manualInstallAvailable);
-    const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
-    const messages = {
-        idle: 'เวอร์ชันปัจจุบัน ' + (state.currentVersion || '-'),
-        checking: 'กำลังตรวจสอบเวอร์ชันใหม่...',
-        available: state.message || ('พบเวอร์ชัน ' + (state.version || '') + ' กำลังดาวน์โหลด...'),
-        downloading: 'กำลังดาวน์โหลด Update ' + percent.toFixed(0) + '%' +
-            (state.total ? ' (' + formatBytes(state.transferred) + ' / ' + formatBytes(state.total) + ')' : ''),
-        verifying: state.message || 'กำลังตรวจสอบไฟล์ Update...',
-        downloaded: state.message || ('ดาวน์โหลดเวอร์ชัน ' + (state.version || '') + ' เสร็จแล้ว กดติดตั้งเพื่อเปิดใหม่'),
-        'manual-installing': state.message || 'เปิด DMG แล้ว แอปกำลังปิดเพื่อให้ติดตั้งด้วยการลากเอง',
-        'up-to-date': state.message || 'ใช้งานเวอร์ชันล่าสุดแล้ว',
-        unavailable: state.message || 'ตรวจสอบ Update ได้จากแอปที่ package แล้วเท่านั้น',
-        error: 'ตรวจสอบ Update ไม่สำเร็จ: ' + (state.message || 'เกิดข้อผิดพลาด')
-    };
-    elements.updateStatus.textContent = messages[state.state] || messages.idle;
-    elements.updateStatus.classList.toggle('update-error', state.state === 'error');
-    elements.updateStatus.classList.toggle('update-ready', updateReady);
-    elements.checkUpdate.disabled = state.state === 'checking' || state.state === 'downloading';
-    elements.installUpdate.hidden = !(updateReady || manualInstallAvailable);
-    elements.installUpdate.textContent = manualInstallAvailable
-        ? 'ดาวน์โหลดและเปิด DMG'
-        : 'ติดตั้งและเปิดใหม่';
-    elements.updateProgress.hidden = state.state !== 'downloading';
-    elements.updateProgressBar.style.width = percent + '%';
-    elements.updateProgressText.textContent = percent.toFixed(0) + '%';
+    const busy = ['checking', 'downloading', 'verifying'].includes(state.state);
+    elements.checkUpdate.disabled = busy;
+    elements.checkUpdate.textContent = busy ? 'กำลังตรวจสอบ...' : 'ตรวจสอบ Update';
 }
 
 async function checkForUpdate() {
@@ -117,18 +74,6 @@ async function checkForUpdate() {
         if (result?.state) setUpdateState(result);
     } catch (error) {
         setUpdateState({ state: 'error', message: error.message });
-    }
-}
-
-async function installUpdate() {
-    if (!updateReady && !manualInstallAvailable) return;
-    elements.installUpdate.disabled = true;
-    try {
-        const result = await api.installUpdate();
-        if (!result.ok) throw new Error(result.message || 'ติดตั้ง Update ไม่สำเร็จ');
-    } catch (error) {
-        elements.installUpdate.disabled = false;
-        showToast(error.message || 'ติดตั้ง Update ไม่สำเร็จ', true);
     }
 }
 
@@ -776,7 +721,6 @@ elements.testItemcode.addEventListener('click', openItemcodeModal);
 elements.testTelegram.addEventListener('click', runTelegramTest);
 elements.testDiscord.addEventListener('click', runDiscordTest);
 elements.checkUpdate.addEventListener('click', checkForUpdate);
-elements.installUpdate.addEventListener('click', installUpdate);
 elements.openChangelog.addEventListener('click', openChangelog);
 elements.closeChangelog.addEventListener('click', closeChangelog);
 elements.changelogModal.addEventListener('click', event => {
@@ -846,6 +790,9 @@ api.onServiceState(state => {
 api.onItemcodeEvent(addItemcodeEvent);
 api.onServiceLog(addServiceLog);
 api.onUpdateState(setUpdateState);
+api.onUpdateNotification(notification => {
+    if (notification?.body) showToast(`${notification.title ? `${notification.title}: ` : ''}${notification.body}`);
+});
 api.onRequirementsUpdate(next => {
     requirements = next;
     renderRequirements();

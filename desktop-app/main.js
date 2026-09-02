@@ -3,7 +3,8 @@ const {
     BrowserWindow,
     dialog,
     ipcMain,
-    shell
+    shell,
+    Notification
 } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const crypto = require('crypto');
@@ -41,6 +42,8 @@ let updateState = 'idle';
 let updateInfo = null;
 let macUpdateAvailable = false;
 let macUpdateDownloadInFlight = false;
+let macUpdatePath = '';
+let updateInstallInFlight = false;
 
 // Download updates automatically, then let the user choose when to restart.
 // autoInstallOnAppQuit also covers the case where the user closes the app
@@ -69,6 +72,27 @@ function setUpdateState(state, extra = {}) {
     if (extra.info) updateInfo = extra.info;
     if (state !== 'downloaded') updateReady = false;
     send('update:state', updatePayload(extra));
+}
+
+function showUpdateNotification(title, body, onClick = null) {
+    const payload = { title, body };
+    try {
+        if (Notification.isSupported()) {
+            const notification = new Notification({ title, body });
+            if (onClick) {
+                notification.once('click', () => {
+                    Promise.resolve(onClick()).catch(error => {
+                        showUpdateNotification('Update ไม่สำเร็จ', error.message);
+                    });
+                });
+            }
+            notification.show();
+            return;
+        }
+    } catch (error) {
+        // Fall back to the renderer toast when native notifications are unavailable.
+    }
+    send('update:notification', payload);
 }
 
 function versionParts(version) {
@@ -106,6 +130,7 @@ async function checkForMacDMGUpdate() {
         macUpdateAvailable = false;
         updateInfo = null;
         setUpdateState('up-to-date', { message: 'ใช้งานเวอร์ชันล่าสุดแล้ว' });
+        showUpdateNotification('ไม่มีเวอร์ชันใหม่', `เวอร์ชันปัจจุบัน ${app.getVersion()} เป็นเวอร์ชันล่าสุดแล้ว`);
         return updatePayload();
     }
 
@@ -129,9 +154,10 @@ async function checkForMacDMGUpdate() {
     setUpdateState('available', {
         info: updateInfo,
         manualInstallAvailable: true,
-        message: `พบเวอร์ชัน ${latestVersion} กดดาวน์โหลดและเปิด DMG เพื่ออัปเดต`
+        message: `พบเวอร์ชัน ${latestVersion} กำลังดาวน์โหลดเบื้องหลัง`
     });
-    return updatePayload();
+    showUpdateNotification('พบเวอร์ชันใหม่', `เวอร์ชัน ${latestVersion} กำลังดาวน์โหลดเบื้องหลัง`);
+    return downloadMacDMG();
 }
 
 function fileDigest(filePath, algorithm) {
@@ -158,7 +184,7 @@ async function verifyDownloadedDigest(filePath, expectedDigest) {
     }
 }
 
-async function downloadAndOpenMacDMG() {
+async function downloadMacDMG() {
     if (macUpdateDownloadInFlight) return updatePayload();
     if (!macUpdateAvailable || !updateInfo?.packageUrl) {
         return { ok: false, message: 'ยังไม่มี DMG Update ให้ดาวน์โหลด' };
@@ -183,36 +209,80 @@ async function downloadAndOpenMacDMG() {
         setUpdateState('verifying', { message: 'กำลังตรวจสอบไฟล์ DMG...' });
         await verifyDownloadedDigest(destination, update.expectedDigest);
 
-        const openError = await shell.openPath(destination);
-        if (openError) throw new Error(`เปิด DMG ไม่สำเร็จ: ${openError}`);
-
-        macUpdateAvailable = false;
-        updateReady = false;
-        setUpdateState('manual-installing', {
-            message: `เปิด DMG เวอร์ชัน ${update.version} แล้ว แอปจะปิด ให้ลากแอปไปที่ Applications แล้วเปิดใหม่`
+        macUpdatePath = destination;
+        macUpdateAvailable = true;
+        updateReady = true;
+        setUpdateState('downloaded', {
+            info: update,
+            manualInstallAvailable: true,
+            message: `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว กดการแจ้งเตือนเพื่อเปิด DMG`
         });
-        await stopService();
-        setTimeout(() => app.quit(), 800);
-        return { ok: true, path: destination, message: 'เปิด DMG แล้ว แอปกำลังปิดเพื่อให้ติดตั้งด้วยการลากเอง' };
+        showUpdateNotification(
+            'มี Update พร้อมติดตั้ง',
+            `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว คลิกการแจ้งเตือนเพื่อเปิด DMG`,
+            () => installDownloadedUpdate()
+        );
+        return { ok: true, path: destination, message: 'ดาวน์โหลด DMG เสร็จแล้ว' };
     } catch (error) {
         setUpdateState('error', { message: error.message });
+        showUpdateNotification('ดาวน์โหลด Update ไม่สำเร็จ', error.message);
         return { ok: false, message: error.message };
     } finally {
         macUpdateDownloadInFlight = false;
     }
 }
 
+async function openDownloadedMacDMG() {
+    if (!macUpdatePath || !fs.existsSync(macUpdatePath)) {
+        throw new Error('ไม่พบไฟล์ DMG ที่ดาวน์โหลดไว้ กรุณากดตรวจสอบ Update อีกครั้ง');
+    }
+    const openError = await shell.openPath(macUpdatePath);
+    if (openError) throw new Error(`เปิด DMG ไม่สำเร็จ: ${openError}`);
+
+    macUpdateAvailable = false;
+    updateReady = false;
+    setUpdateState('manual-installing', {
+        message: `เปิด DMG เวอร์ชัน ${updateInfo?.version || ''} แล้ว แอปจะปิด ให้ลากแอปไปที่ Applications แล้วเปิดใหม่`
+    });
+    await stopService();
+    setTimeout(() => app.quit(), 800);
+    return { ok: true, path: macUpdatePath, message: 'เปิด DMG แล้ว แอปกำลังปิดเพื่อให้ติดตั้งด้วยการลากเอง' };
+}
+
+async function installDownloadedUpdate() {
+    if (updateInstallInFlight) return { ok: true };
+    if (!updateReady) return { ok: false, message: 'ยังไม่มี Update ที่ดาวน์โหลดเสร็จ' };
+
+    updateInstallInFlight = true;
+    try {
+        if (process.platform === 'darwin') return await openDownloadedMacDMG();
+        await stopService();
+        autoUpdater.quitAndInstall();
+        return { ok: true };
+    } finally {
+        updateInstallInFlight = false;
+    }
+}
+
 async function checkForUpdates() {
     if (!app.isPackaged) {
+        const message = 'ตรวจสอบ Update ได้เมื่อเปิดจากแอปที่ package แล้วเท่านั้น';
+        showUpdateNotification('ยังตรวจสอบ Update ไม่ได้', message);
         return updatePayload({
             state: 'unavailable',
-            message: 'ตรวจสอบ Update ได้เมื่อเปิดจากแอปที่ package แล้วเท่านั้น'
+            message
         });
     }
     if (updateReady) {
+        const message = `เวอร์ชัน ${updateInfo?.version || ''} ดาวน์โหลดแล้ว คลิกการแจ้งเตือนเพื่อดำเนินการต่อ`;
+        showUpdateNotification(
+            'มี Update พร้อมติดตั้ง',
+            message,
+            () => installDownloadedUpdate()
+        );
         return updatePayload({
             state: 'downloaded',
-            message: 'มี Update พร้อมติดตั้งแล้ว'
+            message
         });
     }
     if (updateCheckInFlight) return updatePayload();
@@ -227,6 +297,7 @@ async function checkForUpdates() {
         return updatePayload();
     } catch (error) {
         setUpdateState('error', { message: error.message });
+        showUpdateNotification('ตรวจสอบ Update ไม่สำเร็จ', error.message);
         return updatePayload({ ok: false, message: error.message });
     } finally {
         updateCheckInFlight = false;
@@ -237,14 +308,16 @@ autoUpdater.on('checking-for-update', () => setUpdateState('checking'));
 autoUpdater.on('update-available', info => {
     setUpdateState('available', {
         info,
-        message: `พบเวอร์ชัน ${info.version} กำลังดาวน์โหลด...`
+        message: `พบเวอร์ชัน ${info.version} กำลังดาวน์โหลดเบื้องหลัง`
     });
+    showUpdateNotification('พบเวอร์ชันใหม่', `เวอร์ชัน ${info.version} กำลังดาวน์โหลดเบื้องหลัง`);
 });
 autoUpdater.on('update-not-available', info => {
     setUpdateState('up-to-date', {
         info,
         message: 'ใช้งานเวอร์ชันล่าสุดแล้ว'
     });
+    showUpdateNotification('ไม่มีเวอร์ชันใหม่', `เวอร์ชันปัจจุบัน ${app.getVersion()} เป็นเวอร์ชันล่าสุดแล้ว`);
 });
 autoUpdater.on('download-progress', progress => {
     setUpdateState('downloading', {
@@ -262,9 +335,15 @@ autoUpdater.on('update-downloaded', info => {
         info,
         message: `ดาวน์โหลดเวอร์ชัน ${info.version} แล้ว`
     }));
+    showUpdateNotification(
+        'มี Update พร้อมติดตั้ง',
+        `ดาวน์โหลดเวอร์ชัน ${info.version} แล้ว คลิกการแจ้งเตือนเพื่อปิดแอปและติดตั้ง`,
+        () => installDownloadedUpdate()
+    );
 });
 autoUpdater.on('error', error => {
     setUpdateState('error', { message: error.message });
+    showUpdateNotification('ตรวจสอบ Update ไม่สำเร็จ', error.message);
 });
 
 function runtimeDir() {
@@ -1308,17 +1387,7 @@ ipcMain.handle('service:stop', () => stopService());
 ipcMain.handle('service:state', () => ({ running: Boolean(serviceProcess), mode: serviceMode }));
 ipcMain.handle('update:status', () => updatePayload());
 ipcMain.handle('update:check', () => checkForUpdates());
-ipcMain.handle('update:install', async () => {
-    if (process.platform === 'darwin') {
-        return downloadAndOpenMacDMG();
-    }
-    if (!updateReady) {
-        return { ok: false, message: 'ยังไม่มี Update ที่ดาวน์โหลดเสร็จ' };
-    }
-    await stopService();
-    autoUpdater.quitAndInstall();
-    return { ok: true };
-});
+ipcMain.handle('update:install', () => installDownloadedUpdate());
 
 app.whenReady().then(async () => {
     try {

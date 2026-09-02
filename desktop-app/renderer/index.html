@@ -45,24 +45,6 @@
             </div>
         </section>
 
-        <section class="card update-card">
-            <div class="section-heading">
-                <div>
-                    <p class="section-kicker">การอัปเดต</p>
-                    <h2>ตรวจสอบเวอร์ชันใหม่</h2>
-                </div>
-                <div class="heading-actions">
-                    <button class="button button-primary" id="installUpdate" type="button" hidden>ดาวน์โหลดและเปิด DMG</button>
-                </div>
-            </div>
-            <p class="section-note update-note" id="updateStatus" aria-live="polite">กำลังเตรียมระบบ Update...</p>
-            <div class="update-progress" id="updateProgress" hidden>
-                <div class="update-progress-track"><span id="updateProgressBar"></span></div>
-                <span id="updateProgressText">0%</span>
-            </div>
-            <p class="update-platform-note">macOS จะดาวน์โหลดและเปิด DMG จากนั้นปิดแอป ให้ลากแอปใหม่ไปที่ Applications เอง; อาจต้องกด Open Anyway ใน Privacy & Security</p>
-        </section>
-
         <section class="card workspace-card" id="workspaceCard">
             <div class="section-heading">
                 <div>
@@ -221,10 +203,19 @@
                 </div>
                 <div class="changelog-list">
                     <article class="changelog-entry">
+                        <div class="changelog-version">เวอร์ชัน 0.2.1</div>
+                        <ul>
+                            <li>นำส่วนตรวจสอบเวอร์ชันใหม่ออกจากหน้าหลัก เหลือปุ่มตรวจสอบ Update ด้านบน</li>
+                            <li>เมื่อพบเวอร์ชันใหม่ ระบบจะดาวน์โหลดเบื้องหลังและแสดงการแจ้งเตือน</li>
+                            <li>แจ้งเตือนเมื่อไม่มีเวอร์ชันใหม่หรือดาวน์โหลด Update เสร็จแล้ว</li>
+                        </ul>
+                    </article>
+                    <article class="changelog-entry">
                         <div class="changelog-version">เวอร์ชัน 0.2.0</div>
                         <ul>
                             <li>พับ Requirement อัตโนมัติเมื่อครบทุกตัว และจำสถานะไว้เมื่อเปิดแอปครั้งถัดไป</li>
                             <li>ย้ายปุ่ม Start และปุ่มตรวจสอบ Update ไว้ด้านบนใกล้สถานะการทำงาน</li>
+                            <li>เมื่อพบเวอร์ชันใหม่ ระบบจะดาวน์โหลดเบื้องหลังและแจ้งเตือนว่ามีหรือไม่มี Update</li>
                             <li>ลากจุดจับเพื่อเรียงลำดับบัญชีสำหรับรับ ItemCode ได้</li>
                             <li>จำสถานะย่อของส่วนข้อมูลบัญชี</li>
                             <li>เพิ่มตัวกรอง ItemCode Log ครบทุกสถานะ</li>

@@ -64,14 +64,6 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .requirement-summary { margin-top: 14px; color: var(--muted); font-size: 12px; }
 .requirement-summary.ready { color: var(--accent); }
 .requirement-summary.missing { color: var(--warning); }
-.update-card { border-color: rgba(86, 169, 231, .22); }
-.update-note { margin-bottom: 12px; }
-.update-note.update-ready { color: var(--accent); }
-.update-note.update-error { color: var(--danger); }
-.update-platform-note { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.update-progress { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; }
-.update-progress-track { flex: 1; height: 7px; overflow: hidden; border-radius: 99px; background: rgba(144, 171, 204, .12); }
-.update-progress-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent-strong), #56a9e7); transition: width .2s ease; }
 .workspace-card { transition: opacity .2s ease; }
 .workspace-card.locked { opacity: .52; }
 .config-status, .log-count { border-radius: 999px; padding: 6px 9px; background: rgba(144,171,204,.09); color: var(--muted); font-size: 11px; }

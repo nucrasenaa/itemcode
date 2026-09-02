@@ -32,16 +32,18 @@ Changelog ภาษาไทย และ log ที่กรองได้ท�
 
 โปรเจกต์ตั้งค่า `electron-updater` ให้ใช้ public repository
 `nucrasenaa/itemcode` แล้ว การปล่อยเวอร์ชันให้เพิ่ม version ใน
-`package.json` เช่น `0.2.0` และสร้าง tag ให้ตรงกัน เช่น `v0.2.0` จากนั้น GitHub Actions
+`package.json` เช่น `0.2.1` และสร้าง tag ให้ตรงกัน เช่น `v0.2.1` จากนั้น GitHub Actions
 จะ build และ publish artifacts ของ macOS/Windows ไปยัง GitHub Release
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 แอปจะตรวจสอบ Update อัตโนมัติหลังเปิดประมาณ 3 วินาที และมีปุ่มตรวจสอบเอง
-เมื่อดาวน์โหลดเสร็จจะกด `ติดตั้งและเปิดใหม่` ได้ โดยจะหยุด service ก่อนติดตั้ง
+เมื่อพบเวอร์ชันใหม่จะดาวน์โหลดเบื้องหลัง พร้อมแจ้งเตือนว่ามีหรือไม่มี Update
+บน macOS ให้คลิกการแจ้งเตือนเมื่อดาวน์โหลดเสร็จเพื่อเปิด DMG แล้วลากแอปไปที่ Applications
+ส่วน Windows สามารถคลิกการแจ้งเตือนเพื่อปิดแอปและติดตั้งได้
 
 macOS DMG แบบไม่ code sign ยังแจกและติดตั้งด้วยการกด Trust ได้ แต่ auto-update
 ของ macOS ต้องใช้ signed app จึงจะทำงานได้สมบูรณ์
