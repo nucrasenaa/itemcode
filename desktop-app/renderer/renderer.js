@@ -45,6 +45,18 @@ let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
 let updateReady = false;
 let manualInstallAvailable = false;
+let draggedAccountIndex = null;
+let lastRequirementsReady = null;
+
+const SECTION_STATE_PREFIX = 'itemcode.desktop.section.';
+const LOG_STATUS_LABELS = {
+    available: 'ใช้ได้',
+    redeemed: 'รับไอเทมสำเร็จ',
+    redeem_failed: 'รับไอเทมไม่สำเร็จ',
+    retry: 'กำลัง retry',
+    retry_success: 'retry สำเร็จ',
+    info: 'ข้อมูล'
+};
 
 function showToast(message, error = false) {
     elements.toast.textContent = message;
@@ -118,11 +130,43 @@ async function installUpdate() {
 }
 
 function toggleSection(button) {
-    const content = document.getElementById(button.dataset.target);
+    const target = button.dataset.target;
+    const content = document.getElementById(target);
     if (!content) return;
-    const collapsed = content.classList.toggle('collapsed');
-    button.textContent = collapsed ? 'ขยาย' : 'ย่อ';
-    button.setAttribute('aria-expanded', String(!collapsed));
+    setSectionCollapsed(target, !content.classList.contains('collapsed'));
+}
+
+function setSectionCollapsed(target, collapsed, persist = true) {
+    const content = document.getElementById(target);
+    const button = document.querySelector(`.collapse-toggle[data-target="${target}"]`);
+    if (!content) return;
+    const isCollapsed = Boolean(collapsed);
+    content.classList.toggle('collapsed', isCollapsed);
+    if (button) {
+        button.textContent = isCollapsed ? 'ขยาย' : 'ย่อ';
+        button.setAttribute('aria-expanded', String(!isCollapsed));
+    }
+    if (persist) {
+        try {
+            localStorage.setItem(`${SECTION_STATE_PREFIX}${target}`, String(isCollapsed));
+        } catch (error) {
+            // UI state persistence is best-effort when storage is unavailable.
+        }
+    }
+}
+
+function storedSectionState(target) {
+    try {
+        const value = localStorage.getItem(`${SECTION_STATE_PREFIX}${target}`);
+        return value === null ? null : value === 'true';
+    } catch (error) {
+        return null;
+    }
+}
+
+function restoreSectionState(target, defaultCollapsed = false) {
+    const stored = storedSectionState(target);
+    setSectionCollapsed(target, stored === null ? defaultCollapsed : stored, false);
 }
 
 function normalizeItemcodeAccounts(values) {
@@ -158,6 +202,57 @@ function renderItemcodeAccounts(accounts = itemcodeAccounts) {
         const row = document.createElement('div');
         row.className = 'itemcode-account-row';
         row.dataset.accountIndex = String(index);
+
+        const dragHandle = document.createElement('button');
+        dragHandle.type = 'button';
+        dragHandle.className = 'account-drag-handle';
+        dragHandle.textContent = '⋮⋮';
+        dragHandle.title = 'ลากเพื่อเปลี่ยนลำดับบัญชี';
+        dragHandle.setAttribute('aria-label', `ลากเพื่อเปลี่ยนลำดับบัญชีที่ ${index + 1}`);
+        dragHandle.draggable = !running;
+        dragHandle.addEventListener('dragstart', event => {
+            if (running) {
+                event.preventDefault();
+                return;
+            }
+            draggedAccountIndex = index;
+            row.classList.add('dragging');
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', String(index));
+        });
+        dragHandle.addEventListener('dragend', clearAccountDragState);
+
+        row.addEventListener('dragover', event => {
+            if (running || draggedAccountIndex === null) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            const midpoint = row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+            row.classList.toggle('drop-before', event.clientY < midpoint);
+            row.classList.toggle('drop-after', event.clientY >= midpoint);
+        });
+        row.addEventListener('dragleave', event => {
+            if (!row.contains(event.relatedTarget)) {
+                row.classList.remove('drop-before', 'drop-after');
+            }
+        });
+        row.addEventListener('drop', event => {
+            if (running || draggedAccountIndex === null) return;
+            event.preventDefault();
+            const midpoint = row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
+            const fromIndex = draggedAccountIndex;
+            let toIndex = index + (event.clientY >= midpoint ? 1 : 0);
+            const next = readItemcodeAccounts();
+            if (fromIndex < 0 || fromIndex >= next.length) {
+                clearAccountDragState();
+                return;
+            }
+            const [moved] = next.splice(fromIndex, 1);
+            if (fromIndex < toIndex) toIndex -= 1;
+            next.splice(Math.max(0, Math.min(toIndex, next.length)), 0, moved);
+            clearAccountDragState();
+            renderItemcodeAccounts(next);
+            markConfigDirty();
+        });
 
         const order = document.createElement('div');
         order.className = 'account-order';
@@ -202,10 +297,17 @@ function renderItemcodeAccounts(accounts = itemcodeAccounts) {
             markConfigDirty();
         });
 
-        row.append(order, usernameField, passwordField, remove);
+        row.append(dragHandle, order, usernameField, passwordField, remove);
         elements.itemcodeAccountsList.append(row);
     });
     elements.addItemcodeAccount.disabled = running;
+}
+
+function clearAccountDragState() {
+    draggedAccountIndex = null;
+    for (const row of elements.itemcodeAccountsList.querySelectorAll('.itemcode-account-row')) {
+        row.classList.remove('dragging', 'drop-before', 'drop-after');
+    }
 }
 
 function normalizeDiscordWebhooks(values) {
@@ -333,6 +435,10 @@ function setRunning(value, mode = 'running') {
     for (const button of document.querySelectorAll('.remove-webhook')) {
         button.disabled = running || elements.discordWebhookList.querySelectorAll('.discord-webhook-row').length <= 1;
     }
+    for (const handle of document.querySelectorAll('.account-drag-handle')) {
+        handle.draggable = !running;
+        handle.setAttribute('aria-disabled', String(running));
+    }
     for (const input of document.querySelectorAll('.field input, .switch-label input')) input.disabled = running;
 }
 
@@ -390,6 +496,16 @@ function renderRequirements() {
     elements.testLogin.disabled = !allReady || running;
     elements.testItemcode.disabled = !allReady || running;
     elements.testTelegram.disabled = running;
+
+    // A complete requirement check is collapsed automatically on the first
+    // launch, and again when the user fixes missing requirements. The user's
+    // manual expand/collapse choice is preserved while the state is unchanged.
+    if (lastRequirementsReady === null || allReady !== lastRequirementsReady) {
+        setSectionCollapsed('requirementsContent', allReady, true);
+    } else if (!allReady) {
+        setSectionCollapsed('requirementsContent', false, false);
+    }
+    lastRequirementsReady = allReady;
 }
 
 async function refreshRequirements() {
@@ -425,46 +541,45 @@ async function repairRequirementPaths() {
 
 function statusText(event) {
     const attempt = event.attempt ? ` ${event.attempt}/${event.attemptTotal || 3}` : '';
-    const labels = {
-        available: 'ใช้ได้',
-        redeemed: 'รับไอเทมสำเร็จ',
-        redeem_failed: 'รับไอเทมไม่สำเร็จ',
-        retry: `retry${attempt}`,
-        retry_success: `retry สำเร็จ${event.attempt ? ` รอบที่ ${event.attempt}` : ''}`
-    };
-    return labels[event.status] || event.status;
+    if (event.status === 'retry') return `retry${attempt}`;
+    if (event.status === 'retry_success') return `retry สำเร็จ${event.attempt ? ` รอบที่ ${event.attempt}` : ''}`;
+    return LOG_STATUS_LABELS[event.status] || event.status || LOG_STATUS_LABELS.info;
 }
 
-function isSuccessfulEvent(status) {
-    // Only the final Browser redemption event belongs in this filter.
-    // "available" and "retry_success" are scan/retry states, not completed claims.
-    return status === 'redeemed';
+function ensureLogFilterOption(status) {
+    if (!status || [...elements.logFilter.options].some(option => option.value === status)) return;
+    const option = document.createElement('option');
+    option.value = status;
+    option.textContent = `เฉพาะ${LOG_STATUS_LABELS[status] || status}`;
+    elements.logFilter.append(option);
 }
 
 function applyLogFilter() {
-    const onlySuccess = elements.logFilter.value === 'success';
+    const selectedStatus = elements.logFilter.value;
     const rows = [...elements.logList.querySelectorAll('.log-line')];
     let visible = 0;
     for (const row of rows) {
-        const show = !onlySuccess || isSuccessfulEvent(row.dataset.status);
+        const show = selectedStatus === 'all' || row.dataset.status === selectedStatus;
         row.hidden = !show;
         if (show) visible += 1;
     }
     elements.emptyLog.hidden = visible > 0;
-    elements.emptyLog.textContent = onlySuccess && rows.length > 0
-        ? 'ยังไม่มีการเคลมผ่าน Browser สำเร็จ'
-        : 'ยังไม่มี ItemCode ที่ตรวจพบ';
-    elements.logCount.textContent = onlySuccess
-        ? `${visible}/${eventCount} รายการ`
-        : `${eventCount} รายการ`;
+    elements.emptyLog.textContent = selectedStatus === 'all'
+        ? 'ยังไม่มี ItemCode ที่ตรวจพบ'
+        : `ยังไม่มีรายการสถานะ ${LOG_STATUS_LABELS[selectedStatus] || selectedStatus}`;
+    elements.logCount.textContent = selectedStatus === 'all'
+        ? `${visible} รายการ`
+        : `${visible}/${rows.length} รายการ`;
 }
 
 function addItemcodeEvent(event) {
     if (!event?.code) return;
+    const eventStatus = String(event.status || 'info');
+    ensureLogFilterOption(eventStatus);
     elements.emptyLog.hidden = true;
     const row = document.createElement('div');
     row.className = 'log-line';
-    row.dataset.status = event.status || '';
+    row.dataset.status = eventStatus;
 
     const time = document.createElement('span');
     time.className = 'log-time';
@@ -477,7 +592,8 @@ function addItemcodeEvent(event) {
     detail.title = event.detail || '';
     detail.textContent = event.detail || '-';
     const status = document.createElement('span');
-    status.className = `log-status ${event.status || ''}`;
+    status.className = 'log-status';
+    status.classList.add(eventStatus.replace(/[^a-zA-Z0-9_-]/g, '_') || 'info');
     status.textContent = statusText(event);
 
     row.append(time, code, detail, status);
@@ -674,6 +790,8 @@ elements.cancelItemcode.addEventListener('click', closeItemcodeModal);
 for (const button of document.querySelectorAll('.collapse-toggle')) {
     button.addEventListener('click', () => toggleSection(button));
 }
+restoreSectionState('accountContent');
+restoreSectionState('debugContent');
 elements.itemcodeForm.addEventListener('submit', async event => {
     event.preventDefault();
     const code = elements.testItemcodeValue.value.trim().toUpperCase();

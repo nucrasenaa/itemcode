@@ -15,9 +15,13 @@
                 <h1>ตัวจัดการสแกน ItemCode</h1>
                 <p class="subtitle">ตรวจสอบเครื่องมือก่อนเริ่มงาน และติดตามสถานะการรับไอเทมแบบเรียลไทม์</p>
             </div>
-            <div class="run-state" id="runState" data-running="false">
-                <span class="state-dot"></span>
-                <span id="runStateText">หยุดทำงาน</span>
+            <div class="topbar-actions">
+                <button class="button button-primary start-button" id="startStop" type="button">Start</button>
+                <div class="run-state" id="runState" data-running="false">
+                    <span class="state-dot"></span>
+                    <span id="runStateText">หยุดทำงาน</span>
+                </div>
+                <button class="button button-ghost" id="checkUpdate" type="button">ตรวจสอบ Update</button>
             </div>
         </header>
 
@@ -47,7 +51,6 @@
                     <h2>ตรวจสอบเวอร์ชันใหม่</h2>
                 </div>
                 <div class="heading-actions">
-                    <button class="button button-ghost" id="checkUpdate" type="button">ตรวจสอบ Update</button>
                     <button class="button button-primary" id="installUpdate" type="button" hidden>ดาวน์โหลดและเปิด DMG</button>
                 </div>
             </div>
@@ -85,7 +88,7 @@
                 <div class="telegram-heading">
                     <div>
                         <span class="telegram-title">บัญชีสำหรับรับ ItemCode</span>
-                        <span class="telegram-note">เพิ่มได้หลายบัญชี ระบบจะใช้ตามลำดับ: บัญชีที่ 1 → 2 → 3 แล้ววนกลับบัญชีที่ 1</span>
+                        <span class="telegram-note">เพิ่มได้หลายบัญชี ระบบจะใช้ตามลำดับ และลากที่จุดจับเพื่อเปลี่ยนลำดับได้</span>
                     </div>
                     <button class="button button-ghost" id="addItemcodeAccount" type="button">+ เพิ่มบัญชี</button>
                 </div>
@@ -138,7 +141,6 @@
                     <button class="button button-ghost" id="testItemcode" type="button">Test ItemCode</button>
                     <button class="button button-ghost" id="testTelegram" type="button">Test Telegram</button>
                     <button class="button button-ghost" id="testDiscord" type="button">Test Discord</button>
-                    <button class="button button-primary start-button" id="startStop" type="button">Start</button>
                 </div>
               </div>
             </div>
@@ -154,7 +156,11 @@
                     <label class="log-filter-label" for="logFilter">แสดง</label>
                     <select class="log-filter" id="logFilter">
                         <option value="all">ทั้งหมด</option>
-                        <option value="success">เฉพาะเคลมสำเร็จผ่าน Browser</option>
+                        <option value="available">เฉพาะใช้ได้</option>
+                        <option value="redeemed">เฉพาะรับไอเทมสำเร็จ</option>
+                        <option value="redeem_failed">เฉพาะรับไอเทมไม่สำเร็จ</option>
+                        <option value="retry">เฉพาะกำลัง retry</option>
+                        <option value="retry_success">เฉพาะ retry สำเร็จ</option>
                     </select>
                     <span class="log-count" id="logCount">0 รายการ</span>
                 </div>

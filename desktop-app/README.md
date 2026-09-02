@@ -22,19 +22,21 @@ npm run dist -- --win
 
 หน้าจอหลักมีบัญชี Check Serial และรายการบัญชีรับ ItemCode ที่เพิ่มได้หลายรายการ
 ระบบจะรับ ItemCode ตามลำดับบัญชีที่เพิ่มไว้ แล้ววนกลับรายการแรกเมื่อถึงรายการสุดท้าย
+สามารถลากจุดจับเพื่อเรียงลำดับบัญชีได้ และสถานะย่อของ Requirement/ข้อมูลบัญชีจะถูกจำไว้
+เมื่อ Requirement ครบ ระบบจะย่อส่วน Requirement ให้อัตโนมัติเมื่อเปิดแอปครั้งถัดไป
 พร้อม Discord Webhook หลายรายการที่เปิด/ปิดได้, ปุ่มทดสอบการแจ้งเตือน,
-ปุ่ม `Start/Stop` และ log ที่แสดงเฉพาะ ItemCode, รายละเอียด, สถานะรับไอเทม และ retry แต่ละรอบ
+ปุ่ม `Start/Stop` ด้านบน, ปุ่มตรวจสอบ Update ข้างสถานะการทำงาน และ log ที่กรองได้ทุกสถานะ
 
 ## Auto update ผ่าน GitHub Releases
 
 โปรเจกต์ตั้งค่า `electron-updater` ให้ใช้ public repository
 `nucrasenaa/itemcode` แล้ว การปล่อยเวอร์ชันให้เพิ่ม version ใน
-`package.json` เช่น `0.1.9` และสร้าง tag ให้ตรงกัน เช่น `v0.1.9` จากนั้น GitHub Actions
+`package.json` เช่น `0.2.0` และสร้าง tag ให้ตรงกัน เช่น `v0.2.0` จากนั้น GitHub Actions
 จะ build และ publish artifacts ของ macOS/Windows ไปยัง GitHub Release
 
 ```bash
-git tag v0.1.9
-git push origin v0.1.9
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 แอปจะตรวจสอบ Update อัตโนมัติหลังเปิดประมาณ 3 วินาที และมีปุ่มตรวจสอบเอง
