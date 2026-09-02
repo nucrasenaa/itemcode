@@ -13,7 +13,11 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      # electron-builder's GitHub publisher creates/releases the same tag.
+      # Serialize the two platform publishers so they cannot race and create
+      # split duplicate releases.
+      fail-fast: true
+      max-parallel: 1
       matrix:
         os: [macos-latest, windows-latest]
 
