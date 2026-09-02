@@ -22,8 +22,13 @@ $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType
 
 # Helper to await WinRT async operations in PowerShell
 $awaiter = [WindowsRuntimeSystemExtensions].GetMember('GetAwaiter', 'Method', 'Public,Static') | 
-           Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | 
-           Select-Object -First 1
+            Where-Object { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | 
+            Select-Object -First 1
+
+if ($null -eq $awaiter) {
+    [Console]::Error.WriteLine('WinRT OCR awaiter is unavailable in this PowerShell/.NET runtime.')
+    exit 1
+}
 
 function Await-WinRT($AsyncTask, $Type) {
     return $awaiter.MakeGenericMethod($Type).Invoke($null, @($AsyncTask)).GetResult()
@@ -51,15 +56,14 @@ try {
     $bitmapTask = $decoder.GetSoftwareBitmapAsync()
     $bitmap = Await-WinRT $bitmapTask ([Windows.Graphics.Imaging.SoftwareBitmap])
     
-    # Perform OCR using user's profile languages (supports Thai/English if installed)
+    # Use the profile OCR engine. The Windows.Globalization.Language projection
+    # is not available in every PowerShell/.NET host, while this API works with
+    # the WinRT types already loaded above. ItemCode extraction filters for the
+    # expected Latin letters and digits afterwards.
     $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+
     if ($null -eq $engine) {
-        # Fallback to default engine (English)
-        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new("en-US"))
-    }
-    
-    if ($null -eq $engine) {
-        Write-Error "OCR Engine could not be created."
+        [Console]::Error.WriteLine("Windows OCR Engine could not be created. Install an OCR language pack in Windows Settings.")
         exit 1
     }
     
@@ -71,6 +75,8 @@ try {
         Write-Output $line.Text
     }
 } catch {
-    Write-Error $_.Exception.Message
+    # Write-Error can replace the original exception when ErrorActionPreference
+    # is Stop, so write the diagnostic directly to stderr instead.
+    [Console]::Error.WriteLine("OCR helper failed: $($_.Exception.ToString())")
     exit 1
 }

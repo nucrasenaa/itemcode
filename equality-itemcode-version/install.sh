@@ -16,7 +16,7 @@ install_node_macos() {
 install_linux_packages() {
   command -v apt-get >/dev/null 2>&1 || die "ตัวติดตั้ง Linux รองรับ Debian/Ubuntu ที่มี apt-get"
   sudo apt-get update
-  sudo apt-get install -y ca-certificates curl ffmpeg python3 tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng
+  sudo apt-get install -y ca-certificates curl ffmpeg python3 tesseract-ocr tesseract-ocr-eng
 
   if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'parseInt(process.versions.node.split(".")[0], 10)')" -lt 20 ]; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -

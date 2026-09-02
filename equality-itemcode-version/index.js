@@ -1847,30 +1847,44 @@ async function captureFrame(directUrl, outputPath) {
         } catch (e) { }
     }
 
-    const inputOptions = /^https?:\/\//i.test(String(directUrl || ''))
-        ? [
-            '-rw_timeout', '20000000',
-            '-reconnect', '1',
-            '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '5'
-        ]
+    const isRemoteInput = /^https?:\/\//i.test(String(directUrl || ''));
+    // Keep a generous process watchdog for Windows' slower first HLS segment.
+    // The shorter HTTP read timeout handles a dead request; when the overall
+    // watchdog is reached, the scan loop refreshes the HLS URL instead of
+    // reconnecting the same stale URL.
+    const inputOptions = isRemoteInput
+        ? ['-rw_timeout', isWindows ? '15000000' : '20000000']
         : [];
+    const frameTimeoutMs = isWindows ? 45000 : 30000;
     const commandVariants = [
         [
+            '-hide_banner',
             '-nostdin',
             '-y',
             '-loglevel', 'error',
             ...inputOptions,
+            '-analyzeduration', '1000000',
+            '-probesize', '1000000',
             '-i', directUrl,
+            '-map', '0:v:0',
+            '-an',
+            '-sn',
+            '-dn',
             '-frames:v', '1',
             '-f', 'image2',
             outputPath
         ],
         [
+            '-hide_banner',
             '-nostdin',
             '-y',
             '-loglevel', 'error',
+            ...inputOptions,
             '-i', directUrl,
+            '-map', '0:v:0',
+            '-an',
+            '-sn',
+            '-dn',
             '-vframes', '1',
             '-f', 'image2',
             outputPath
@@ -1881,12 +1895,19 @@ async function captureFrame(directUrl, outputPath) {
     for (let attempt = 0; attempt < commandVariants.length; attempt++) {
         const args = commandVariants[attempt];
         try {
-            await execFileAsync(ffmpeg, args, { timeout: 30000, maxBuffer: 1024 * 1024 });
-            if (fs.existsSync(outputPath)) return true;
+            await execFileAsync(ffmpeg, args, {
+                timeout: frameTimeoutMs,
+                maxBuffer: 1024 * 1024,
+                windowsHide: true
+            });
+            try {
+                if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return true;
+            } catch (e) { }
             attemptDiagnostics.push(`attempt ${attempt + 1}: exit=0 แต่ไม่พบไฟล์ภาพ`);
         } catch (error) {
             lastError = error;
             const errorDetail = [
+                error.killed ? `timeout>${frameTimeoutMs}ms` : '',
                 error.code ? `code=${error.code}` : '',
                 error.signal ? `signal=${error.signal}` : '',
                 error.killed ? 'killed=true' : '',
@@ -1894,7 +1915,7 @@ async function captureFrame(directUrl, outputPath) {
                 error.stdout ? `stdout=${String(error.stdout).trim()}` : ''
             ].filter(Boolean).join(' | ').replace(/\s+/g, ' ').slice(-900);
             attemptDiagnostics.push(`attempt ${attempt + 1}: ${errorDetail || 'ไม่ทราบข้อผิดพลาด'}`);
-            if (attempt < commandVariants.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
+            if (attempt < commandVariants.length - 1) await new Promise(resolve => setTimeout(resolve, 750));
         }
     }
 
@@ -1905,7 +1926,7 @@ async function captureFrame(directUrl, outputPath) {
         .trim()
         .slice(-1800);
     const cookieSource = config.ytdl_cookies_from_browser || 'none';
-    log(`[-] ffmpeg: Frame capture failed after ${commandVariants.length} attempts (source=${sourceHost}, path=${ffmpeg}, ytdl_cookies=${cookieSource}): ${diagnostic}`);
+    log(`[-] ffmpeg: Frame capture failed after ${commandVariants.length} attempts (source=${sourceHost}, path=${ffmpeg}, timeout=${frameTimeoutMs}ms, ytdl_cookies=${cookieSource}): ${diagnostic}`);
     return false;
 }
 
@@ -1929,31 +1950,20 @@ async function runOcr(imagePath) {
                 .map(line => line.trim())
                 .filter(line => line.length > 0);
         } catch (e) {
-            log(`[-] PowerShell OCR script run failed: ${e.message}`);
+            const stderr = String(e.stderr || '').trim().replace(/\s+/g, ' ');
+            log(`[-] PowerShell OCR script run failed: ${stderr || e.message}`);
             return [];
         }
     } else if (isLinux || ocrPath.toLowerCase().includes('tesseract')) {
         try {
-            const { stdout } = await execFileAsync(ocrPath, [imagePath, 'stdout', '-l', 'tha+eng'], { timeout: 15000 });
+            const { stdout } = await execFileAsync(ocrPath, [imagePath, 'stdout', '-l', 'eng'], { timeout: 15000 });
             return stdout.split('\n')
                 .map(line => line.trim())
                 .filter(line => line.length > 0);
         } catch (e) {
-            if (e.message.includes('Error opening data file') || e.message.includes('tha.traineddata')) {
-                try {
-                    log(`[!] Warning: Tesseract Thai language pack not found. Falling back to English only.`);
-                    const { stdout } = await execFileAsync(ocrPath, [imagePath, 'stdout', '-l', 'eng'], { timeout: 15000 });
-                    return stdout.split('\n')
-                        .map(line => line.trim())
-                        .filter(line => line.length > 0);
-                } catch (err) {
-                    log(`[-] Tesseract OCR execution fallback failed: ${err.message}`);
-                    return [];
-                }
-            }
             log(`[-] OCR Error: Tesseract execution failed: ${e.message}`);
-            log(`[-] On Linux (Debian/Ubuntu), make sure it is installed:`);
-            log(`[-]   sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng`);
+            log(`[-] On Linux (Debian/Ubuntu), make sure English OCR is installed:`);
+            log(`[-]   sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng`);
             return [];
         }
     } else {
@@ -1995,14 +2005,25 @@ function extractCodes(lines) {
         // Heuristic 2: Remove chat @mentions
         targetText = targetText.replace(/@\w+/g, '');
 
-        // Match regex
-        regex.lastIndex = 0;
-        let match;
-        const uppercaseText = targetText.toUpperCase();
-        while ((match = regex.exec(uppercaseText)) !== null) {
-            const cleaned = match[0].replace(/\s+/g, '').replace(/\./g, '').trim();
-            if (cleaned && !codes.includes(cleaned)) {
-                codes.push(cleaned);
+        // Windows OCR can insert spaces, dots, dashes, or pipe characters
+        // between ItemCode characters (for example: "GEMS 9K2R 7X3M").
+        // Match both the original text and a conservative joined form so the
+        // regex can still recognize the same code without changing unrelated
+        // Thai/English OCR text.
+        const uppercaseText = targetText.normalize('NFKC').toUpperCase();
+        const joinedText = uppercaseText.replace(/(?<=[A-Z0-9])[\s._|·-]+(?=[A-Z0-9])/g, '');
+        const textsToMatch = joinedText === uppercaseText
+            ? [uppercaseText]
+            : [uppercaseText, joinedText];
+
+        for (const textToMatch of textsToMatch) {
+            regex.lastIndex = 0;
+            let match;
+            while ((match = regex.exec(textToMatch)) !== null) {
+                const cleaned = match[0].replace(/[\s._|·-]+/g, '').trim();
+                if (cleaned && !codes.includes(cleaned)) {
+                    codes.push(cleaned);
+                }
             }
         }
     }
@@ -2201,7 +2222,7 @@ async function scanStreamLoop(videoUrl) {
     log(`[*] เริ่มทำการสแกนวิดีโอ/สตรีมสด: ${videoUrl}`);
     let cachedDirectUrl = null;
     let failureCount = 0;
-    const maxFailures = 6; // ~1 minute of continuous failure
+    const maxFailures = 12; // tolerate temporary CDN/network failures without stopping the stream
     lastPeriodicSleepTime = Date.now();
     let lastLiveCheckTime = Date.now();
 
@@ -2262,7 +2283,10 @@ async function scanStreamLoop(videoUrl) {
 
         // Wait for scan_interval
         const intervalMs = (config.scan_interval || 10.0) * 1000;
-        await sleep(intervalMs);
+        const nextScanDelayMs = result.success
+            ? intervalMs
+            : Math.min(intervalMs, isWindows ? 3000 : 5000);
+        await sleep(nextScanDelayMs);
     }
 
     log(`[*] ปิดระบบสแกนสตรีม ${videoUrl}`);

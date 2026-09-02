@@ -33,7 +33,7 @@ npm install
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y nodejs npm ffmpeg tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng
+sudo apt-get install -y nodejs npm ffmpeg tesseract-ocr tesseract-ocr-eng
 sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp
 sudo chmod a+rx /usr/local/bin/yt-dlp
 cd /path/to/itemcode/node_service
