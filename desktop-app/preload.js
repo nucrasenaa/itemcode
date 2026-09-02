@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
     openRequirementHelp: (id) => ipcRenderer.invoke('requirements:help', id),
     loadSettings: () => ipcRenderer.invoke('settings:load'),
     saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+    saveItemcodeAccountOrder: (accounts) => ipcRenderer.invoke('settings:save-itemcode-account-order', accounts),
     start: (settings) => ipcRenderer.invoke('service:start', settings),
     testLogin: (settings) => ipcRenderer.invoke('service:test-login', settings),
     testItemcode: (payload) => ipcRenderer.invoke('service:test-itemcode', payload),

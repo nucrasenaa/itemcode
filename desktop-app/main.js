@@ -1374,6 +1374,17 @@ ipcMain.handle('settings:save', (_event, settings) => {
     writeConfig(config);
     return { ok: true };
 });
+ipcMain.handle('settings:save-itemcode-account-order', (_event, accounts) => {
+    const rawAccounts = Array.isArray(accounts) ? accounts : [];
+    const itemcodeAccounts = normalizeItemcodeAccounts({ itemcodeAccounts: rawAccounts });
+    if (itemcodeAccounts.length !== rawAccounts.length) {
+        return { ok: false, message: 'บันทึกลำดับไม่ได้ กรุณากรอก username/password ของทุกบัญชีให้ครบ' };
+    }
+    const config = readConfig();
+    applyItemcodeAccounts(config, { itemcodeAccounts });
+    writeConfig(config);
+    return { ok: true };
+});
 ipcMain.handle('service:start', (_event, settings) => startService(settings));
 ipcMain.handle('service:test-login', (_event, settings) => startService(settings, ['--test-login'], 'test-login'));
 ipcMain.handle('service:test-itemcode', (_event, payload) => {

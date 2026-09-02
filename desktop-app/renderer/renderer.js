@@ -43,6 +43,8 @@ let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
 let draggedAccountIndex = null;
 let lastRequirementsReady = null;
+let accountOrderSaveQueue = Promise.resolve();
+let configRevision = 0;
 
 const SECTION_STATE_PREFIX = 'itemcode.desktop.section.';
 const LOG_STATUS_LABELS = {
@@ -138,8 +140,33 @@ function readItemcodeAccounts() {
 }
 
 function markConfigDirty() {
+    configRevision += 1;
     elements.configStatus.textContent = 'มีการแก้ไข';
     elements.configStatus.classList.remove('saved');
+}
+
+function persistItemcodeAccountOrder() {
+    const accounts = readItemcodeAccounts();
+    if (accounts.length === 0 || accounts.some(account => !account.username.trim() || !account.password)) {
+        return;
+    }
+
+    const revision = configRevision;
+    const snapshot = accounts.map(account => ({ ...account }));
+    accountOrderSaveQueue = accountOrderSaveQueue
+        .catch(() => {})
+        .then(async () => {
+            const saved = await api.saveItemcodeAccountOrder(snapshot);
+            if (!saved?.ok) throw new Error(saved?.message || 'บันทึกลำดับบัญชีไม่สำเร็จ');
+            if (revision === configRevision) {
+                elements.configStatus.textContent = 'บันทึกลำดับบัญชีแล้ว';
+                elements.configStatus.classList.add('saved');
+            }
+        })
+        .catch(error => {
+            markConfigDirty();
+            showToast(error.message || 'บันทึกลำดับบัญชีไม่สำเร็จ', true);
+        });
 }
 
 function renderItemcodeAccounts(accounts = itemcodeAccounts) {
@@ -200,6 +227,7 @@ function renderItemcodeAccounts(accounts = itemcodeAccounts) {
             clearAccountDragState();
             renderItemcodeAccounts(next);
             markConfigDirty();
+            persistItemcodeAccountOrder();
         });
 
         const order = document.createElement('div');
