@@ -20,6 +20,9 @@ const elements = {
     updateProgress: document.getElementById('updateProgress'),
     updateProgressBar: document.getElementById('updateProgressBar'),
     updateProgressText: document.getElementById('updateProgressText'),
+    openChangelog: document.getElementById('openChangelog'),
+    changelogModal: document.getElementById('changelogModal'),
+    closeChangelog: document.getElementById('closeChangelog'),
     itemcodeModal: document.getElementById('itemcodeModal'),
     itemcodeForm: document.getElementById('itemcodeForm'),
     testItemcodeValue: document.getElementById('testItemcodeValue'),
@@ -755,6 +758,16 @@ function closeItemcodeModal() {
     elements.itemcodeModal.hidden = true;
 }
 
+function openChangelog() {
+    elements.changelogModal.hidden = false;
+    elements.closeChangelog.focus();
+}
+
+function closeChangelog() {
+    elements.changelogModal.hidden = true;
+    elements.openChangelog.focus();
+}
+
 elements.refreshRequirements.addEventListener('click', refreshRequirements);
 elements.repairRequirementPaths.addEventListener('click', repairRequirementPaths);
 elements.startStop.addEventListener('click', toggleService);
@@ -764,6 +777,11 @@ elements.testTelegram.addEventListener('click', runTelegramTest);
 elements.testDiscord.addEventListener('click', runDiscordTest);
 elements.checkUpdate.addEventListener('click', checkForUpdate);
 elements.installUpdate.addEventListener('click', installUpdate);
+elements.openChangelog.addEventListener('click', openChangelog);
+elements.closeChangelog.addEventListener('click', closeChangelog);
+elements.changelogModal.addEventListener('click', event => {
+    if (event.target === elements.changelogModal) closeChangelog();
+});
 elements.logFilter.addEventListener('change', applyLogFilter);
 elements.addItemcodeAccount.addEventListener('click', () => {
     if (running) return;
@@ -787,6 +805,9 @@ elements.clearDebugLog.addEventListener('click', () => {
     debugLogStarted = false;
 });
 elements.cancelItemcode.addEventListener('click', closeItemcodeModal);
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !elements.changelogModal.hidden) closeChangelog();
+});
 for (const button of document.querySelectorAll('.collapse-toggle')) {
     button.addEventListener('click', () => toggleSection(button));
 }

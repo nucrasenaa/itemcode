@@ -22,6 +22,7 @@
                     <span id="runStateText">หยุดทำงาน</span>
                 </div>
                 <button class="button button-ghost" id="checkUpdate" type="button">ตรวจสอบ Update</button>
+                <button class="button button-ghost" id="openChangelog" type="button">Changelog ภาษาไทย</button>
             </div>
         </header>
 
@@ -207,6 +208,38 @@
                     <button class="button button-primary" type="submit">เริ่มทดสอบ</button>
                 </div>
             </form>
+        </div>
+
+        <div class="modal-backdrop" id="changelogModal" hidden>
+            <section class="test-modal changelog-modal" role="dialog" aria-modal="true" aria-labelledby="changelogTitle">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">CHANGELOG ภาษาไทย</p>
+                        <h2 id="changelogTitle">รายการเปลี่ยนแปลง</h2>
+                    </div>
+                    <button class="button button-ghost" id="closeChangelog" type="button">ปิด</button>
+                </div>
+                <div class="changelog-list">
+                    <article class="changelog-entry">
+                        <div class="changelog-version">เวอร์ชัน 0.2.0</div>
+                        <ul>
+                            <li>พับ Requirement อัตโนมัติเมื่อครบทุกตัว และจำสถานะไว้เมื่อเปิดแอปครั้งถัดไป</li>
+                            <li>ย้ายปุ่ม Start และปุ่มตรวจสอบ Update ไว้ด้านบนใกล้สถานะการทำงาน</li>
+                            <li>ลากจุดจับเพื่อเรียงลำดับบัญชีสำหรับรับ ItemCode ได้</li>
+                            <li>จำสถานะย่อของส่วนข้อมูลบัญชี</li>
+                            <li>เพิ่มตัวกรอง ItemCode Log ครบทุกสถานะ</li>
+                            <li>เพิ่มปุ่ม Changelog ภาษาไทย</li>
+                        </ul>
+                    </article>
+                    <article class="changelog-entry">
+                        <div class="changelog-version">เวอร์ชัน 0.1.9</div>
+                        <ul>
+                            <li>ปรับการอัปเดตบน macOS เป็นการดาวน์โหลดและเปิด DMG เพื่อติดตั้งด้วยการลากเอง</li>
+                            <li>เพิ่มการตรวจสอบ checksum ของไฟล์ DMG ก่อนเปิดใช้งาน</li>
+                        </ul>
+                    </article>
+                </div>
+            </section>
         </div>
 
         <div class="toast" id="toast" role="status" aria-live="polite"></div>

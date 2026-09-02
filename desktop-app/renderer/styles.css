@@ -138,6 +138,11 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(1, 8, 17, .72); backdrop-filter: blur(8px); z-index: 10; }
 .modal-backdrop[hidden] { display: none; }
 .test-modal { width: min(420px, 100%); border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: #10243d; box-shadow: 0 24px 80px rgba(0,0,0,.4); }
+.changelog-modal { width: min(680px, 100%); max-height: min(680px, calc(100vh - 48px)); overflow: auto; }
+.changelog-list { display: grid; gap: 14px; margin-top: 20px; }
+.changelog-entry { border: 1px solid rgba(165,190,225,.14); border-radius: 12px; padding: 14px 16px; background: rgba(4,13,25,.32); }
+.changelog-version { color: var(--accent); font-size: 13px; font-weight: 800; }
+.changelog-entry ul { display: grid; gap: 8px; margin: 10px 0 0; padding-left: 19px; color: #c8d7e9; font-size: 12px; line-height: 1.55; }
 .test-modal h2 { margin-bottom: 6px; }
 .test-modal .section-note { margin-bottom: 18px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
