@@ -117,7 +117,8 @@ async function checkForMacDMGUpdate() {
     const response = await fetch(GITHUB_LATEST_RELEASE_URL, {
         headers: {
             Accept: 'application/vnd.github+json',
-            'User-Agent': 'itemcode-desktop-updater'
+            'User-Agent': 'itemcode-desktop-updater',
+            'Cache-Control': 'no-cache'
         }
     });
     if (!response.ok) {
@@ -184,6 +185,35 @@ async function verifyDownloadedDigest(filePath, expectedDigest) {
     }
 }
 
+async function fetchCurrentMacDMGInfo(packageName = '') {
+    const response = await fetch(GITHUB_LATEST_RELEASE_URL, {
+        headers: {
+            Accept: 'application/vnd.github+json',
+            'User-Agent': 'itemcode-desktop-updater',
+            'Cache-Control': 'no-cache'
+        }
+    });
+    if (!response.ok) return null;
+
+    const release = await response.json();
+    const latestVersion = String(release.tag_name || '').replace(/^[vV]/, '');
+    const architecture = process.arch === 'arm64' ? 'arm64' : 'x64';
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const dmgAsset = assets.find(asset => asset.name === packageName)
+        || assets.find(asset => new RegExp(`-${architecture}\\.dmg$`, 'i').test(asset.name || ''))
+        || assets.find(asset => /\\.dmg$/i.test(asset.name || ''));
+    if (!latestVersion || !dmgAsset?.browser_download_url) return null;
+
+    return {
+        version: latestVersion,
+        releaseDate: release.published_at || release.created_at || '',
+        packageName: dmgAsset.name,
+        packageUrl: dmgAsset.browser_download_url,
+        expectedDigest: dmgAsset.digest || '',
+        releaseUrl: release.html_url || ''
+    };
+}
+
 async function downloadMacDMG() {
     if (macUpdateDownloadInFlight) return updatePayload();
     if (!macUpdateAvailable || !updateInfo?.packageUrl) {
@@ -191,38 +221,62 @@ async function downloadMacDMG() {
     }
 
     macUpdateDownloadInFlight = true;
-    const update = updateInfo;
-    const safeName = String(update.packageName || `Equality-ItemCode-Watcher-${update.version}.dmg`)
-        .replace(/[^a-zA-Z0-9._-]+/g, '-');
-    const destination = path.join(app.getPath('downloads'), safeName);
+    let update = updateInfo;
+    let digestRefreshAttempted = false;
     try {
-        setUpdateState('downloading', { message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...` });
-        await downloadFile(update.packageUrl, destination, 0, ({ transferred, total }) => {
-            const percent = total > 0 ? (transferred / total) * 100 : 0;
-            setUpdateState('downloading', {
-                percent,
-                transferred,
-                total,
-                message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...`
-            });
-        });
-        setUpdateState('verifying', { message: 'กำลังตรวจสอบไฟล์ DMG...' });
-        await verifyDownloadedDigest(destination, update.expectedDigest);
+        while (true) {
+            const safeName = String(update.packageName || `Equality-ItemCode-Watcher-${update.version}.dmg`)
+                .replace(/[^a-zA-Z0-9._-]+/g, '-');
+            const destination = path.join(app.getPath('downloads'), safeName);
+            try {
+                setUpdateState('downloading', { message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...` });
+                await downloadFile(update.packageUrl, destination, 0, ({ transferred, total }) => {
+                    const percent = total > 0 ? (transferred / total) * 100 : 0;
+                    setUpdateState('downloading', {
+                        percent,
+                        transferred,
+                        total,
+                        message: `กำลังดาวน์โหลด DMG เวอร์ชัน ${update.version}...`
+                    });
+                });
+                setUpdateState('verifying', { message: 'กำลังตรวจสอบไฟล์ DMG...' });
+                await verifyDownloadedDigest(destination, update.expectedDigest);
 
-        macUpdatePath = destination;
-        macUpdateAvailable = true;
-        updateReady = true;
-        setUpdateState('downloaded', {
-            info: update,
-            manualInstallAvailable: true,
-            message: `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว กดการแจ้งเตือนเพื่อเปิด DMG`
-        });
-        showUpdateNotification(
-            'มี Update พร้อมติดตั้ง',
-            `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว คลิกการแจ้งเตือนเพื่อเปิด DMG`,
-            () => installDownloadedUpdate()
-        );
-        return { ok: true, path: destination, message: 'ดาวน์โหลด DMG เสร็จแล้ว' };
+                macUpdatePath = destination;
+                macUpdateAvailable = true;
+                updateReady = true;
+                setUpdateState('downloaded', {
+                    info: update,
+                    manualInstallAvailable: true,
+                    message: `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว กดการแจ้งเตือนเพื่อเปิด DMG`
+                });
+                showUpdateNotification(
+                    'มี Update พร้อมติดตั้ง',
+                    `ดาวน์โหลดเวอร์ชัน ${update.version} แล้ว คลิกการแจ้งเตือนเพื่อเปิด DMG`,
+                    () => installDownloadedUpdate()
+                );
+                return { ok: true, path: destination, message: 'ดาวน์โหลด DMG เสร็จแล้ว' };
+            } catch (error) {
+                const isDigestMismatch = String(error?.message || '').includes('ตรวจสอบ checksum ของ DMG ไม่ผ่าน');
+                if (!digestRefreshAttempted && isDigestMismatch) {
+                    digestRefreshAttempted = true;
+                    const refreshed = await fetchCurrentMacDMGInfo(update.packageName);
+                    const digestChanged = refreshed?.expectedDigest
+                        && refreshed.expectedDigest.toLowerCase() !== String(update.expectedDigest || '').toLowerCase();
+                    const assetChanged = refreshed
+                        && (refreshed.packageName !== update.packageName || refreshed.version !== update.version);
+                    if (refreshed && (digestChanged || assetChanged)) {
+                        update = refreshed;
+                        updateInfo = refreshed;
+                        try {
+                            fs.unlinkSync(destination);
+                        } catch (cleanupError) { }
+                        continue;
+                    }
+                }
+                throw error;
+            }
+        }
     } catch (error) {
         setUpdateState('error', { message: error.message });
         showUpdateNotification('ดาวน์โหลด Update ไม่สำเร็จ', error.message);
