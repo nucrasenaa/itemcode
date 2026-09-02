@@ -699,11 +699,13 @@ function generateCodeVariations(code, maxVariations = 64) {
         'B': ['B', '8'],
         '5': ['5', 'S'],
         'S': ['S', '1S', 'IS', '5'],
-        '2': ['2', 'Z'],
+        // Thai OCR can confuse ๒ and ๗; both are normalized to Arabic
+        // digits before this function, so keep both candidate directions.
+        '2': ['2', 'Z', '7'],
         'Z': ['Z', '2'],
         '6': ['6', 'G'],
         'G': ['G', '6'],
-        '7': ['7', 'T'],
+        '7': ['7', 'T', '2'],
         'T': ['T', '7'],
         'U': ['U', 'V'],
         'V': ['V', 'U'],
@@ -1775,6 +1777,23 @@ async function runOcr(imagePath) {
     }
 }
 
+const THAI_DIGIT_MAP = Object.freeze({
+    '๐': '0',
+    '๑': '1',
+    '๒': '2',
+    '๓': '3',
+    '๔': '4',
+    '๕': '5',
+    '๖': '6',
+    '๗': '7',
+    '๘': '8',
+    '๙': '9'
+});
+
+function normalizeThaiDigits(text) {
+    return String(text || '').replace(/[๐-๙]/g, digit => THAI_DIGIT_MAP[digit] || digit);
+}
+
 // Filter and extract codes using Regex heuristics
 function extractCodes(lines) {
     const codes = [];
@@ -1801,7 +1820,7 @@ function extractCodes(lines) {
         // Match both the original text and a conservative joined form so the
         // regex can still recognize the same code without changing unrelated
         // Thai/English OCR text.
-        const uppercaseText = targetText.normalize('NFKC').toUpperCase();
+        const uppercaseText = normalizeThaiDigits(targetText.normalize('NFKC')).toUpperCase();
         const joinedText = uppercaseText.replace(/(?<=[A-Z0-9])[\s._|·-]+(?=[A-Z0-9])/g, '');
         const textsToMatch = joinedText === uppercaseText
             ? [uppercaseText]

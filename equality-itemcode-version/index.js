@@ -822,11 +822,13 @@ function generateCodeVariations(code, maxVariations = 64) {
         'B': ['B', '8'],
         '5': ['5', 'S'],
         'S': ['S', '1S', 'IS', '5'],
-        '2': ['2', 'Z'],
+        // Thai OCR can confuse ๒ and ๗; both are normalized to Arabic
+        // digits before this function, so keep both candidate directions.
+        '2': ['2', 'Z', '7'],
         'Z': ['Z', '2'],
         '6': ['6', 'G'],
         'G': ['G', '6'],
-        '7': ['7', 'T'],
+        '7': ['7', 'T', '2'],
         'T': ['T', '7'],
         'U': ['U', 'V'],
         'V': ['V', 'U'],
