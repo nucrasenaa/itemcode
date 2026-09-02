@@ -1,6 +1,6 @@
 {
   "name": "itemcode-desktop",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Cross-platform desktop UI for equality-itemcode-version",
   "main": "main.js",
   "type": "commonjs",
@@ -49,8 +49,11 @@
     ],
     "mac": {
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
+      "identity": null,
+      "hardenedRuntime": false,
       "icon": "build/icon.icns"
     },
     "win": {
@@ -58,9 +61,18 @@
         "nsis"
       ],
       "icon": "build/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "nucrasenaa",
+      "repo": "itemcode",
+      "releaseType": "release"
     }
   },
   "allowScripts": {
     "electron@38.8.6": true
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

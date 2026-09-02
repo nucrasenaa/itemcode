@@ -5,6 +5,7 @@ const {
     ipcMain,
     shell
 } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -32,6 +33,96 @@ let serviceProcess = null;
 let serviceMode = 'idle';
 let serviceOutputBuffer = '';
 let serviceErrorBuffer = '';
+let updateCheckInFlight = false;
+let updateReady = false;
+let updateState = 'idle';
+let updateInfo = null;
+
+// Download updates automatically, then let the user choose when to restart.
+// autoInstallOnAppQuit also covers the case where the user closes the app
+// after the update has finished downloading.
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+
+function updatePayload(extra = {}) {
+    return {
+        state: updateState,
+        currentVersion: app.getVersion(),
+        updateReady,
+        version: updateInfo?.version || '',
+        releaseDate: updateInfo?.releaseDate || '',
+        ...extra
+    };
+}
+
+function setUpdateState(state, extra = {}) {
+    updateState = state;
+    if (extra.info) updateInfo = extra.info;
+    if (state !== 'downloaded') updateReady = false;
+    send('update:state', updatePayload(extra));
+}
+
+async function checkForUpdates() {
+    if (!app.isPackaged) {
+        return updatePayload({
+            state: 'unavailable',
+            message: 'ตรวจสอบ Update ได้เมื่อเปิดจากแอปที่ package แล้วเท่านั้น'
+        });
+    }
+    if (updateReady) {
+        return updatePayload({
+            state: 'downloaded',
+            message: 'มี Update พร้อมติดตั้งแล้ว'
+        });
+    }
+    if (updateCheckInFlight) return updatePayload();
+
+    updateCheckInFlight = true;
+    setUpdateState('checking');
+    try {
+        await autoUpdater.checkForUpdates();
+        return updatePayload();
+    } catch (error) {
+        setUpdateState('error', { message: error.message });
+        return updatePayload({ ok: false, message: error.message });
+    } finally {
+        updateCheckInFlight = false;
+    }
+}
+
+autoUpdater.on('checking-for-update', () => setUpdateState('checking'));
+autoUpdater.on('update-available', info => {
+    setUpdateState('available', {
+        info,
+        message: `พบเวอร์ชัน ${info.version} กำลังดาวน์โหลด...`
+    });
+});
+autoUpdater.on('update-not-available', info => {
+    setUpdateState('up-to-date', {
+        info,
+        message: 'ใช้งานเวอร์ชันล่าสุดแล้ว'
+    });
+});
+autoUpdater.on('download-progress', progress => {
+    setUpdateState('downloading', {
+        percent: Number(progress.percent || 0),
+        bytesPerSecond: Number(progress.bytesPerSecond || 0),
+        transferred: Number(progress.transferred || 0),
+        total: Number(progress.total || 0)
+    });
+});
+autoUpdater.on('update-downloaded', info => {
+    updateReady = true;
+    updateInfo = info;
+    updateState = 'downloaded';
+    send('update:state', updatePayload({
+        info,
+        message: `ดาวน์โหลดเวอร์ชัน ${info.version} แล้ว`
+    }));
+});
+autoUpdater.on('error', error => {
+    setUpdateState('error', { message: error.message });
+});
 
 function runtimeDir() {
     if (!app.isPackaged) return SERVICE_SOURCE_DIR;
@@ -1066,12 +1157,24 @@ ipcMain.handle('telegram:test', (_event, settings) => testTelegram(settings));
 ipcMain.handle('discord:test', (_event, settings) => testDiscord(settings));
 ipcMain.handle('service:stop', () => stopService());
 ipcMain.handle('service:state', () => ({ running: Boolean(serviceProcess), mode: serviceMode }));
+ipcMain.handle('update:status', () => updatePayload());
+ipcMain.handle('update:check', () => checkForUpdates());
+ipcMain.handle('update:install', async () => {
+    if (!updateReady) {
+        return { ok: false, message: 'ยังไม่มี Update ที่ดาวน์โหลดเสร็จ' };
+    }
+    await stopService();
+    autoUpdater.quitAndInstall();
+    return { ok: true };
+});
 
 app.whenReady().then(async () => {
     try {
         ensureRuntimeDirectory();
         readConfig();
         createWindow();
+        // Register renderer listeners before the first automatic check.
+        setTimeout(() => checkForUpdates(), 3000);
     } catch (error) {
         dialog.showErrorBox('Equality ItemCode Watcher', error.message);
         app.quit();

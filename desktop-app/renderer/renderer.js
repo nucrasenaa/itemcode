@@ -14,6 +14,12 @@ const elements = {
     testItemcode: document.getElementById('testItemcode'),
     testTelegram: document.getElementById('testTelegram'),
     testDiscord: document.getElementById('testDiscord'),
+    checkUpdate: document.getElementById('checkUpdate'),
+    installUpdate: document.getElementById('installUpdate'),
+    updateStatus: document.getElementById('updateStatus'),
+    updateProgress: document.getElementById('updateProgress'),
+    updateProgressBar: document.getElementById('updateProgressBar'),
+    updateProgressText: document.getElementById('updateProgressText'),
     itemcodeModal: document.getElementById('itemcodeModal'),
     itemcodeForm: document.getElementById('itemcodeForm'),
     testItemcodeValue: document.getElementById('testItemcodeValue'),
@@ -37,6 +43,7 @@ let toastTimer = null;
 let debugLogStarted = false;
 let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
+let updateReady = false;
 
 function showToast(message, error = false) {
     elements.toast.textContent = message;
@@ -44,6 +51,63 @@ function showToast(message, error = false) {
     elements.toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => elements.toast.classList.remove('show'), 4200);
+}
+
+function formatBytes(bytes) {
+    if (!bytes) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    return value.toFixed(unit === 0 ? 0 : 1) + ' ' + units[unit];
+}
+
+function setUpdateState(state = {}) {
+    updateReady = Boolean(state.updateReady || state.state === 'downloaded');
+    const percent = Math.max(0, Math.min(100, Number(state.percent || 0)));
+    const messages = {
+        idle: 'เวอร์ชันปัจจุบัน ' + (state.currentVersion || '-'),
+        checking: 'กำลังตรวจสอบเวอร์ชันใหม่...',
+        available: state.message || ('พบเวอร์ชัน ' + (state.version || '') + ' กำลังดาวน์โหลด...'),
+        downloading: 'กำลังดาวน์โหลด Update ' + percent.toFixed(0) + '%' +
+            (state.total ? ' (' + formatBytes(state.transferred) + ' / ' + formatBytes(state.total) + ')' : ''),
+        downloaded: state.message || ('ดาวน์โหลดเวอร์ชัน ' + (state.version || '') + ' เสร็จแล้ว กดติดตั้งเพื่อเปิดใหม่'),
+        'up-to-date': state.message || 'ใช้งานเวอร์ชันล่าสุดแล้ว',
+        unavailable: state.message || 'ตรวจสอบ Update ได้จากแอปที่ package แล้วเท่านั้น',
+        error: 'ตรวจสอบ Update ไม่สำเร็จ: ' + (state.message || 'เกิดข้อผิดพลาด')
+    };
+    elements.updateStatus.textContent = messages[state.state] || messages.idle;
+    elements.updateStatus.classList.toggle('update-error', state.state === 'error');
+    elements.updateStatus.classList.toggle('update-ready', updateReady);
+    elements.checkUpdate.disabled = state.state === 'checking' || state.state === 'downloading';
+    elements.installUpdate.hidden = !updateReady;
+    elements.updateProgress.hidden = state.state !== 'downloading';
+    elements.updateProgressBar.style.width = percent + '%';
+    elements.updateProgressText.textContent = percent.toFixed(0) + '%';
+}
+
+async function checkForUpdate() {
+    try {
+        const result = await api.checkForUpdate();
+        if (result?.state) setUpdateState(result);
+    } catch (error) {
+        setUpdateState({ state: 'error', message: error.message });
+    }
+}
+
+async function installUpdate() {
+    if (!updateReady) return;
+    elements.installUpdate.disabled = true;
+    try {
+        const result = await api.installUpdate();
+        if (!result.ok) throw new Error(result.message || 'ติดตั้ง Update ไม่สำเร็จ');
+    } catch (error) {
+        elements.installUpdate.disabled = false;
+        showToast(error.message || 'ติดตั้ง Update ไม่สำเร็จ', true);
+    }
 }
 
 function toggleSection(button) {
@@ -575,6 +639,8 @@ elements.testLogin.addEventListener('click', () => startTest('test-login'));
 elements.testItemcode.addEventListener('click', openItemcodeModal);
 elements.testTelegram.addEventListener('click', runTelegramTest);
 elements.testDiscord.addEventListener('click', runDiscordTest);
+elements.checkUpdate.addEventListener('click', checkForUpdate);
+elements.installUpdate.addEventListener('click', installUpdate);
 elements.logFilter.addEventListener('change', applyLogFilter);
 elements.addItemcodeAccount.addEventListener('click', () => {
     if (running) return;
@@ -633,6 +699,7 @@ api.onServiceState(state => {
 });
 api.onItemcodeEvent(addItemcodeEvent);
 api.onServiceLog(addServiceLog);
+api.onUpdateState(setUpdateState);
 api.onRequirementsUpdate(next => {
     requirements = next;
     renderRequirements();
@@ -640,9 +707,14 @@ api.onRequirementsUpdate(next => {
 
 (async function init() {
     try {
-        const [settings, state] = await Promise.all([api.loadSettings(), api.getServiceState()]);
+        const [settings, state, update] = await Promise.all([
+            api.loadSettings(),
+            api.getServiceState(),
+            api.getUpdateStatus()
+        ]);
         setInputs(settings);
         setRunning(state.running, state.mode);
+        setUpdateState(update);
         await refreshRequirements();
     } catch (error) {
         showToast(error.message || 'เปิดแอปไม่สำเร็จ', true);

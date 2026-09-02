@@ -24,3 +24,21 @@ npm run dist -- --win
 ระบบจะรับ ItemCode ตามลำดับบัญชีที่เพิ่มไว้ แล้ววนกลับรายการแรกเมื่อถึงรายการสุดท้าย
 พร้อม Discord Webhook หลายรายการที่เปิด/ปิดได้, ปุ่มทดสอบการแจ้งเตือน,
 ปุ่ม `Start/Stop` และ log ที่แสดงเฉพาะ ItemCode, รายละเอียด, สถานะรับไอเทม และ retry แต่ละรอบ
+
+## Auto update ผ่าน GitHub Releases
+
+โปรเจกต์ตั้งค่า `electron-updater` ให้ใช้ public repository
+`nucrasenaa/itemcode` แล้ว การปล่อยเวอร์ชันให้เพิ่ม version ใน
+`package.json` เช่น `0.1.7` และสร้าง tag เช่น `v0.1.7` จากนั้น GitHub Actions
+จะ build และ publish artifacts ของ macOS/Windows ไปยัง GitHub Release
+
+```bash
+git tag v0.1.7
+git push origin v0.1.7
+```
+
+แอปจะตรวจสอบ Update อัตโนมัติหลังเปิดประมาณ 3 วินาที และมีปุ่มตรวจสอบเอง
+เมื่อดาวน์โหลดเสร็จจะกด `ติดตั้งและเปิดใหม่` ได้ โดยจะหยุด service ก่อนติดตั้ง
+
+macOS DMG แบบไม่ code sign ยังแจกและติดตั้งด้วยการกด Trust ได้ แต่ auto-update
+ของ macOS ต้องใช้ signed app จึงจะทำงานได้สมบูรณ์

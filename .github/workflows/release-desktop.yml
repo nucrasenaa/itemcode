@@ -1,0 +1,45 @@
+name: Release desktop app
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            desktop-app/package-lock.json
+            equality-itemcode-version/package-lock.json
+
+      - name: Install service dependencies
+        working-directory: equality-itemcode-version
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop-app
+        run: npm ci
+
+      - name: Build and publish
+        working-directory: desktop-app
+        run: npm run dist -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

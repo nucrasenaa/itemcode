@@ -40,6 +40,25 @@
             </div>
         </section>
 
+        <section class="card update-card">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">การอัปเดต</p>
+                    <h2>ตรวจสอบเวอร์ชันใหม่</h2>
+                </div>
+                <div class="heading-actions">
+                    <button class="button button-ghost" id="checkUpdate" type="button">ตรวจสอบ Update</button>
+                    <button class="button button-primary" id="installUpdate" type="button" hidden>ติดตั้งและเปิดใหม่</button>
+                </div>
+            </div>
+            <p class="section-note update-note" id="updateStatus" aria-live="polite">กำลังเตรียมระบบ Update...</p>
+            <div class="update-progress" id="updateProgress" hidden>
+                <div class="update-progress-track"><span id="updateProgressBar"></span></div>
+                <span id="updateProgressText">0%</span>
+            </div>
+            <p class="update-platform-note">macOS แบบ DMG ที่ยังไม่ได้ code sign ใช้ติดตั้งแบบกด Trust ได้ แต่ auto-update อาจทำงานไม่ผ่านจนกว่าจะ sign แอป</p>
+        </section>
+
         <section class="card workspace-card" id="workspaceCard">
             <div class="section-heading">
                 <div>

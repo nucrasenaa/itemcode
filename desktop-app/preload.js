@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
     testDiscord: (settings) => ipcRenderer.invoke('discord:test', settings),
     stop: () => ipcRenderer.invoke('service:stop'),
     getServiceState: () => ipcRenderer.invoke('service:state'),
+    getUpdateStatus: () => ipcRenderer.invoke('update:status'),
+    checkForUpdate: () => ipcRenderer.invoke('update:check'),
+    installUpdate: () => ipcRenderer.invoke('update:install'),
     onRequirementsUpdate: (callback) => {
         const listener = (_event, requirements) => callback(requirements);
         ipcRenderer.on('requirements:update', listener);
@@ -33,5 +36,10 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
         const listener = (_event, entry) => callback(entry);
         ipcRenderer.on('service:log', listener);
         return () => ipcRenderer.removeListener('service:log', listener);
+    },
+    onUpdateState: (callback) => {
+        const listener = (_event, state) => callback(state);
+        ipcRenderer.on('update:state', listener);
+        return () => ipcRenderer.removeListener('update:state', listener);
     }
 });
