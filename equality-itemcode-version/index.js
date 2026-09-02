@@ -808,12 +808,16 @@ function generateCodeVariations(code, maxVariations = 64) {
     code = code.trim().toUpperCase();
     if (!code) return [];
 
+    // Common OCR confusions. Keep the original character first so the
+    // candidate generated from OCR is always tried before corrections.
     const charVariations = {
         '1': ['1', 'I'],
         'I': ['I', '1'],
-        '0': ['0', 'O', 'D'],
-        'O': ['O', '0', 'D'],
-        'D': ['D', '0', 'O'],
+        'Q': ['Q', 'O', '0', 'D', 'C'],
+        'O': ['O', 'Q', '0', 'D', 'C'],
+        '0': ['0', 'O', 'Q', 'D', 'C'],
+        'D': ['D', '0', 'O', 'Q', 'C'],
+        'C': ['C', '0', 'O', 'Q', 'D'],
         '8': ['8', 'B'],
         'B': ['B', '8'],
         '5': ['5', 'S'],
@@ -830,7 +834,7 @@ function generateCodeVariations(code, maxVariations = 64) {
         '4': ['4', 'A']
     };
 
-    // Find variable indices and limit to the first 6 to keep product size small (max 4^6 = 4096)
+    // Find variable indices and limit to the first 6 to keep product size small (max 5^6 = 15625)
     const variableIndices = [];
     for (let i = 0; i < code.length; i++) {
         if (charVariations[code[i]]) {
