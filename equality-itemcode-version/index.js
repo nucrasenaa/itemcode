@@ -1950,7 +1950,8 @@ async function runOcr(imagePath) {
                 .map(line => line.trim())
                 .filter(line => line.length > 0);
         } catch (e) {
-            log(`[-] PowerShell OCR script run failed: ${e.message}`);
+            const stderr = String(e.stderr || '').trim().replace(/\s+/g, ' ');
+            log(`[-] PowerShell OCR script run failed: ${stderr || e.message}`);
             return [];
         }
     } else if (isLinux || ocrPath.toLowerCase().includes('tesseract')) {
