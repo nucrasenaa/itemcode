@@ -1988,6 +1988,23 @@ async function runOcr(imagePath) {
     }
 }
 
+const THAI_DIGIT_MAP = Object.freeze({
+    '๐': '0',
+    '๑': '1',
+    '๒': '2',
+    '๓': '3',
+    '๔': '4',
+    '๕': '5',
+    '๖': '6',
+    '๗': '7',
+    '๘': '8',
+    '๙': '9'
+});
+
+function normalizeThaiDigits(text) {
+    return String(text || '').replace(/[๐-๙]/g, digit => THAI_DIGIT_MAP[digit] || digit);
+}
+
 // Filter and extract codes using Regex heuristics
 function extractCodes(lines) {
     const codes = [];
@@ -2014,7 +2031,8 @@ function extractCodes(lines) {
         // Match both the original text and a conservative joined form so the
         // regex can still recognize the same code without changing unrelated
         // Thai/English OCR text.
-        const uppercaseText = targetText.normalize('NFKC').toUpperCase();
+        // OCR may return Thai digits even when the code uses Arabic digits.
+        const uppercaseText = normalizeThaiDigits(targetText.normalize('NFKC')).toUpperCase();
         const joinedText = uppercaseText.replace(/(?<=[A-Z0-9])[\s._|·-]+(?=[A-Z0-9])/g, '');
         const textsToMatch = joinedText === uppercaseText
             ? [uppercaseText]
