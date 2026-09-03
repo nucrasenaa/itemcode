@@ -118,6 +118,7 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .log-filter:focus { border-color: rgba(112,225,194,.66); }
 .log-list { display: grid; gap: 7px; max-height: 330px; overflow: auto; padding-right: 2px; }
 .log-line { min-height: 46px; border: 1px solid rgba(165,190,225,.10); border-radius: 11px; padding: 8px 12px; background: rgba(5,15,28,.33); font-size: 12px; }
+.log-line.log-line-filtered-out { display: none; }
 .log-time { color: #7088a7; font-variant-numeric: tabular-nums; }
 .log-code { color: #dffcf5; font-weight: 800; letter-spacing: .06em; }
 .log-detail { min-width: 0; overflow: hidden; color: #b7c8dc; text-overflow: ellipsis; white-space: nowrap; }

@@ -537,6 +537,7 @@ function applyLogFilter() {
     for (const row of rows) {
         const show = selectedStatus === 'all' || row.dataset.status === selectedStatus;
         row.hidden = !show;
+        row.classList.toggle('log-line-filtered-out', !show);
         if (show) visible += 1;
     }
     elements.emptyLog.hidden = visible > 0;
