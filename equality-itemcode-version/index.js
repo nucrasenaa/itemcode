@@ -2246,7 +2246,8 @@ async function scanStreamLoop(videoUrl) {
     log(`[*] เริ่มทำการสแกนวิดีโอ/สตรีมสด: ${videoUrl}`);
     let cachedDirectUrl = null;
     let failureCount = 0;
-    const maxFailures = 12; // tolerate temporary CDN/network failures without stopping the stream
+    let notLiveCount = 0;
+    const maxFailures = 60; // tolerate several minutes of temporary CDN/network failures
     lastPeriodicSleepTime = Date.now();
     let lastLiveCheckTime = Date.now();
 
@@ -2262,9 +2263,19 @@ async function scanStreamLoop(videoUrl) {
             lastLiveCheckTime = Date.now();
             const live = await isStreamLive(videoUrl);
             if (!live) {
-                log(`[*] ตรวจพบว่าสตรีมสดสิ้นสุดการแพร่ภาพแล้ว`);
-                break;
+                notLiveCount++;
+                // yt-dlp can briefly report false while YouTube refreshes the
+                // live manifest. Do not stop the worker on one bad probe.
+                log(`[*] ตรวจสอบสถานะไลฟ์ไม่สำเร็จ/ไม่พบไลฟ์ชั่วคราว (ครั้งที่ ${notLiveCount}/3)`);
+                if (notLiveCount >= 3) {
+                    log(`[*] ยืนยันแล้วว่าสตรีมสดสิ้นสุดการแพร่ภาพ`);
+                    break;
+                }
+                cachedDirectUrl = null;
+                await sleep(15000);
+                continue;
             }
+            notLiveCount = 0;
         }
         // Resolve direct stream URL if not cached
         if (!cachedDirectUrl) {
@@ -2314,6 +2325,7 @@ async function scanStreamLoop(videoUrl) {
     }
 
     log(`[*] ปิดระบบสแกนสตรีม ${videoUrl}`);
+    return { ended: notLiveCount >= 3 };
 }
 
 function clearLogFiles() {
@@ -2589,7 +2601,12 @@ async function main() {
         }
     } else {
         log(`[*] ตรวจพบลิงก์ประเภทวิดีโอ/สตรีมโดยตรง กำลังสแกนทันที...`);
-        await scanStreamLoop(targetUrl);
+        while (isRunning) {
+            const result = await scanStreamLoop(targetUrl);
+            if (result?.ended || !isRunning) break;
+            log(`[*] การสแกนหยุดจากข้อผิดพลาดชั่วคราว จะเริ่มเชื่อมต่อใหม่ใน 30 วินาที...`);
+            await sleep(30000);
+        }
     }
 }
 

@@ -1265,6 +1265,13 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         const finishedMode = serviceMode;
         serviceProcess = null;
         serviceMode = 'idle';
+        if (code !== 0 && code !== null) {
+            send('service:log', {
+                stream: 'stderr',
+                text: `[service] worker stopped unexpectedly: code=${code}, signal=${signal || 'none'}`,
+                time: new Date().toISOString()
+            });
+        }
         send('service:state', { running: false, mode: 'idle', finishedMode, code, signal });
     });
     send('service:state', { running: true, mode });
