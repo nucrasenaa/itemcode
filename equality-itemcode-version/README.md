@@ -1,5 +1,17 @@
 # `equality-itemcode-version`
 
+## ทดสอบ OCR บน Windows
+
+ชุด regression ใช้ภาพตัวอย่างใน `test/fixtures` และ Windows built-in OCR:
+
+```powershell
+npm test
+npm run test:ocr
+```
+
+`test:ocr` ตรวจทั้ง 3 ภาพตามลำดับและยืนยันว่าได้ `WATT2T6F9L3N`,
+`FAME5C4Q8V3H`, `RANK1N7B5T6M` ตามที่คาดไว้
+
 Service รุ่นแยกของ ItemCode Watcher สำหรับ flow แบบ Browser ตั้งแต่ login,
 สร้าง session/access token, ตรวจสอบ code, แจ้งเตือน และทำรายการผ่านหน้าเว็บ
 โดยรองรับ Telegram แบบ optional

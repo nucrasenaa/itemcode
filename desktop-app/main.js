@@ -491,6 +491,8 @@ function ensureRuntimeDirectory() {
         'playwright_login.mjs',
         'browser_login_test.mjs',
         'ocr_helper.ps1',
+        'ocr_image_preprocessor.cs',
+        'ocr-code-utils.js',
         'ocr_helper.swift',
         'service_config.json.example'
     ]) {

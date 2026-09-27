@@ -6,6 +6,14 @@ Param(
 
 $ErrorActionPreference = "Stop"
 
+try {
+    Add-Type -AssemblyName System.Drawing
+    $drawingAssembly = [System.Drawing.Bitmap].Assembly.Location
+    Add-Type -Path (Join-Path $PSScriptRoot 'ocr_image_preprocessor.cs') -ReferencedAssemblies $drawingAssembly
+} catch {
+    [Console]::Error.WriteLine("OCR preprocessing is unavailable; original frame will still be used: $($_.Exception.Message)")
+}
+
 # Load WinRT assemblies (requires Windows 10/11)
 try {
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -41,21 +49,6 @@ try {
         exit 1
     }
     
-    # Load storage file
-    $fileTask = [Windows.Storage.StorageFile]::GetFileFromPathAsync($absPath)
-    $file = Await-WinRT $fileTask ([Windows.Storage.StorageFile])
-    
-    # Open file stream
-    $streamTask = $file.OpenAsync([Windows.Storage.FileAccessMode]::Read)
-    $stream = Await-WinRT $streamTask ([Windows.Storage.Streams.IRandomAccessStream])
-    
-    # Decode image to SoftwareBitmap
-    $decoderTask = [Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)
-    $decoder = Await-WinRT $decoderTask ([Windows.Graphics.Imaging.BitmapDecoder])
-    
-    $bitmapTask = $decoder.GetSoftwareBitmapAsync()
-    $bitmap = Await-WinRT $bitmapTask ([Windows.Graphics.Imaging.SoftwareBitmap])
-    
     # Use the profile OCR engine. The Windows.Globalization.Language projection
     # is not available in every PowerShell/.NET host, while this API works with
     # the WinRT types already loaded above. ItemCode extraction filters for the
@@ -67,12 +60,36 @@ try {
         exit 1
     }
     
-    $ocrTask = $engine.RecognizeAsync($bitmap)
-    $result = Await-WinRT $ocrTask ([Windows.Media.Ocr.OcrResult])
-    
-    # Output recognized lines
-    foreach ($line in $result.Lines) {
-        Write-Output $line.Text
+    $variantPaths = @()
+    if ('ItemCodeOcrImagePrep' -as [type]) {
+        try { $variantPaths = [ItemCodeOcrImagePrep]::CreateVariants($absPath) }
+        catch { [Console]::Error.WriteLine("OCR preprocessing failed; trying original frame: $($_.Exception.Message)") }
+    }
+
+    # Enhanced variants first so valid, prominent code overlays are discovered
+    # before unrelated text. The original pass preserves colored/dark overlays.
+    $passIndex = 0
+    foreach ($candidatePath in (@($variantPaths) + @($absPath))) {
+        Write-Output "__OCR_PASS_${passIndex}__"
+        try {
+            $fileTask = [Windows.Storage.StorageFile]::GetFileFromPathAsync([System.IO.Path]::GetFullPath($candidatePath))
+            $file = Await-WinRT $fileTask ([Windows.Storage.StorageFile])
+            $streamTask = $file.OpenAsync([Windows.Storage.FileAccessMode]::Read)
+            $stream = Await-WinRT $streamTask ([Windows.Storage.Streams.IRandomAccessStream])
+            $decoderTask = [Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)
+            $decoder = Await-WinRT $decoderTask ([Windows.Graphics.Imaging.BitmapDecoder])
+            $bitmapTask = $decoder.GetSoftwareBitmapAsync()
+            $bitmap = Await-WinRT $bitmapTask ([Windows.Graphics.Imaging.SoftwareBitmap])
+            $ocrTask = $engine.RecognizeAsync($bitmap)
+            $result = Await-WinRT $ocrTask ([Windows.Media.Ocr.OcrResult])
+            foreach ($line in $result.Lines) { Write-Output $line.Text }
+        } catch {
+            [Console]::Error.WriteLine("OCR pass failed: $($_.Exception.Message)")
+        }
+        if ($candidatePath -ne $absPath) {
+            Remove-Item -LiteralPath $candidatePath -Force -ErrorAction SilentlyContinue
+        }
+        $passIndex++
     }
 } catch {
     # Write-Error can replace the original exception when ErrorActionPreference

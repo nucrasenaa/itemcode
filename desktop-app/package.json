@@ -1,6 +1,6 @@
 {
   "name": "itemcode-desktop",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Cross-platform desktop UI for equality-itemcode-version",
   "main": "main.js",
   "type": "commonjs",
@@ -34,6 +34,8 @@
           "browser_login_test.mjs",
           "ocr_helper",
           "ocr_helper.ps1",
+          "ocr_image_preprocessor.cs",
+          "ocr-code-utils.js",
           "ocr_helper.swift",
           "service_config.json.example",
           "node_modules/**/*"

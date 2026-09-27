@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
+const { extractCodes } = require('./ocr-code-utils');
 const util = require('util');
 const crypto = require('crypto');
 
@@ -1951,10 +1952,20 @@ async function runOcr(imagePath) {
                 '-ExecutionPolicy', 'Bypass',
                 '-File', ocrPath,
                 imagePath
-            ], { timeout: 10000 });
-            return stdout.split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0);
+            ], { timeout: 30000 });
+            let pass = 0;
+            const lines = [];
+            for (const rawLine of stdout.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line) continue;
+                const marker = line.match(/^__OCR_PASS_(\d+)__$/);
+                if (marker) {
+                    pass = Number(marker[1]);
+                    continue;
+                }
+                lines.push({ text: line, pass });
+            }
+            return lines;
         } catch (e) {
             const stderr = String(e.stderr || '').trim().replace(/\s+/g, ' ');
             log(`[-] PowerShell OCR script run failed: ${stderr || e.message}`);
@@ -1990,70 +2001,6 @@ async function runOcr(imagePath) {
     }
 }
 
-const THAI_DIGIT_MAP = Object.freeze({
-    '๐': '0',
-    '๑': '1',
-    '๒': '2',
-    '๓': '3',
-    '๔': '4',
-    '๕': '5',
-    '๖': '6',
-    '๗': '7',
-    '๘': '8',
-    '๙': '9'
-});
-
-function normalizeThaiDigits(text) {
-    return String(text || '').replace(/[๐-๙]/g, digit => THAI_DIGIT_MAP[digit] || digit);
-}
-
-// Filter and extract codes using Regex heuristics
-function extractCodes(lines) {
-    const codes = [];
-    const pattern = config.regex_pattern || "\\b(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{8,24}\\b";
-    const regex = new RegExp(pattern, 'gi');
-
-    for (const line of lines) {
-        let targetText = line;
-
-        // Heuristic 1: If line contains ':', split and skip username prefix (unless it starts with "code" or is digit)
-        if (line.includes(':')) {
-            const parts = line.split(':');
-            const beforeColon = parts[0].trim();
-            if (!beforeColon.toLowerCase().startsWith('code') && !/^\d+$/.test(beforeColon)) {
-                targetText = parts.slice(1).join(':');
-            }
-        }
-
-        // Heuristic 2: Remove chat @mentions
-        targetText = targetText.replace(/@\w+/g, '');
-
-        // Windows OCR can insert spaces, dots, dashes, or pipe characters
-        // between ItemCode characters (for example: "GEMS 9K2R 7X3M").
-        // Match both the original text and a conservative joined form so the
-        // regex can still recognize the same code without changing unrelated
-        // Thai/English OCR text.
-        // OCR may return Thai digits even when the code uses Arabic digits.
-        const uppercaseText = normalizeThaiDigits(targetText.normalize('NFKC')).toUpperCase();
-        const joinedText = uppercaseText.replace(/(?<=[A-Z0-9])[\s._|·-]+(?=[A-Z0-9])/g, '');
-        const textsToMatch = joinedText === uppercaseText
-            ? [uppercaseText]
-            : [uppercaseText, joinedText];
-
-        for (const textToMatch of textsToMatch) {
-            regex.lastIndex = 0;
-            let match;
-            while ((match = regex.exec(textToMatch)) !== null) {
-                const cleaned = match[0].replace(/[\s._|·-]+/g, '').trim();
-                if (cleaned && !codes.includes(cleaned)) {
-                    codes.push(cleaned);
-                }
-            }
-        }
-    }
-    return codes;
-}
-
 // Process single scanning round
 async function processScan(directUrl) {
     const captured = await captureFrame(directUrl, TEMP_FRAME);
@@ -2071,13 +2018,15 @@ async function processScan(directUrl) {
     } catch (e) { }
 
     if (lines.length > 0) {
-        const preview = lines.slice(0, 3).join(', ') + (lines.length > 3 ? '...' : '');
+        const preview = lines.slice(0, 3)
+            .map(line => typeof line === 'string' ? line : line.text)
+            .join(', ') + (lines.length > 3 ? '...' : '');
         log(`[*] OCR read: "${preview}"`);
     } else {
         log(`[*] OCR: No text detected on screen`);
     }
 
-    const codes = extractCodes(lines);
+    const codes = extractCodes(lines, config.regex_pattern);
     if (codes.length > 0) {
         for (const code of codes) {
             if (!history.has(code)) {

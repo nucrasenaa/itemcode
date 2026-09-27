@@ -4,7 +4,8 @@
   "description": "ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รองรับ macOS, Windows และ Ubuntu/Linux พร้อมแจ้งเตือนผ่าน Telegram แบบเลือกใช้ได้",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"No automated tests configured\"",
+    "test": "node --test test/code-ocr-utils.test.js",
+    "test:ocr": "node test/ocr-fixtures.test.js",
     "test:login": "node playwright_login.mjs",
     "test:login:show": "node browser_login_test.mjs --show-chromium"
   },
