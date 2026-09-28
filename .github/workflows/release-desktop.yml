@@ -9,13 +9,31 @@ permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    name: Prepare GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release before platform publishers start
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Equality ItemCode Watcher $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
   build:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    needs: prepare-release
     strategy:
-      # electron-builder's GitHub publisher creates/releases the same tag.
-      # Serialize the two platform publishers so they cannot race and create
-      # split duplicate releases.
+      # Keep platform publishers serialized. The release is pre-created above
+      # so electron-builder targets the same release instead of racing to
+      # create split duplicate releases.
       fail-fast: true
       max-parallel: 1
       matrix:
