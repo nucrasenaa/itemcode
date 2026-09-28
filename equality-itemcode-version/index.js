@@ -35,7 +35,6 @@ let hasNotifiedTokenExpired = false;
 let autoLoginPromise = null;
 let lastAutoLoginAttemptAt = 0;
 const AUTO_LOGIN_RETRY_INTERVAL_MS = 30000;
-let lastPeriodicSleepTime = Date.now();
 let activeYoutubeChat = null;
 const discordDestinationCache = new Map();
 const discordNotificationCache = new Map();
@@ -1693,23 +1692,6 @@ async function retryCheckSerialAndNotify(serial, initialMessage) {
     return { retrySuccess: false, result: lastResult, sentTelegram: false, sentDiscord: false };
 }
 
-// Sleep OCR function helper
-async function sleepOcr(minutes, reason = 'notification') {
-    if (reason === 'periodic') {
-        log(`[*] ทำงานสแกนครบ 5 นาที: กำลังหยุดพักการสแกน OCR เป็นเวลา ${minutes} นาทีชั่วคราว... (สตรีมสดจะยังคงเล่นต่อไป)`);
-    } else {
-        log(`[*] ตรวจพบการส่งแจ้งเตือน: กำลังหยุดพักการสแกน OCR เป็นเวลา ${minutes} นาที... (สตรีมสดจะยังคงเล่นต่อไป)`);
-    }
-    const ms = minutes * 60 * 1000;
-    const segment = 1000; // 1 second
-    const totalSegments = ms / segment;
-    for (let i = 0; i < totalSegments && isRunning; i++) {
-        await sleep(segment);
-    }
-    lastPeriodicSleepTime = Date.now();
-    log(`[*] ครบ ${minutes} นาทีแล้ว เริ่มทำงานสแกน OCR ต่อ...`);
-}
-
 // Detect if URL is a YouTube channel
 function isYoutubeChannel(url) {
     const lower = url.toLowerCase();
@@ -2019,7 +2001,7 @@ async function processDetectedCodes(codes, source = 'OCR') {
         }
         for (const code of codes) {
             if (!history.has(code)) {
-                if (await checkPrefixAndHandleDuplicate(code, history, saveHistory, sleepOcr)) {
+                if (checkPrefixAndHandleDuplicate(code, history, saveHistory)) {
                     break;
                 }
                 const variations = generateCodeVariations(code);
@@ -2117,10 +2099,6 @@ async function processDetectedCodes(codes, source = 'OCR') {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
-                            await sleepOcr(10);
-                        }
-                        
                         success = true;
                         break;
                     }
@@ -2153,10 +2131,6 @@ async function processDetectedCodes(codes, source = 'OCR') {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
-                            await sleepOcr(10);
-                        }
-                        
                         success = true;
                         break;
                     }
@@ -2210,6 +2184,14 @@ async function processScan(directUrl) {
 async function processYoutubeChatItem(chatItem) {
     const messageText = youtubeChatMessageText(chatItem);
     if (!messageText) return { success: true };
+    console.log(`[YOUTUBE_CHAT] ${JSON.stringify({
+        id: String(chatItem?.id || ''),
+        author: String(chatItem?.author?.name || '').slice(0, 120),
+        text: messageText.slice(0, 2000),
+        time: chatItem?.timestamp instanceof Date && !Number.isNaN(chatItem.timestamp.getTime())
+            ? chatItem.timestamp.toISOString()
+            : new Date().toISOString()
+    })}`);
     const codes = extractCodes([messageText], config.regex_pattern);
     return enqueueDetectedCodes(codes, 'YouTube Chat');
 }
@@ -2226,16 +2208,9 @@ async function scanStreamLoop(videoUrl) {
     let failureCount = 0;
     let notLiveCount = 0;
     const maxFailures = 60; // tolerate several minutes of temporary CDN/network failures
-    lastPeriodicSleepTime = Date.now();
     let lastLiveCheckTime = Date.now();
 
     while (isRunning) {
-        // Periodic sleep: 2 minutes sleep every 5 minutes
-        if (Date.now() - lastPeriodicSleepTime >= 5 * 60 * 1000) {
-            await sleepOcr(2, 'periodic');
-            continue;
-        }
-
         // Check if stream has ended every 2 minutes
         if (Date.now() - lastLiveCheckTime >= 2 * 60 * 1000) {
             lastLiveCheckTime = Date.now();
@@ -2307,7 +2282,7 @@ async function scanStreamLoop(videoUrl) {
 }
 
 async function youtubeChatLoop(sourceUrl) {
-    if (!isMac || config.youtube_chat_enabled !== true) return;
+    if (config.youtube_chat_enabled !== true) return;
 
     let LiveChat;
     try {
@@ -2458,7 +2433,7 @@ function checkAndClearLogIfNewDay() {
     }
 }
 
-async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallback, sleepCallback) {
+function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallback) {
     const logPath = path.join(__dirname, 'notified_codes.log');
     
     // Check log rotation
@@ -2493,7 +2468,7 @@ async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallba
     }
     
     if (duplicateFound) {
-        log(`[!] ตรวจพบรหัส ${scannedPrefix} ซ้ำกับประวัติการแจ้งเตือน (ข้ามการทำงานและหยุดสแกน 5 นาที)`);
+        log(`[!] ตรวจพบรหัส ${scannedPrefix} ซ้ำกับประวัติการแจ้งเตือน (ข้ามรหัสซ้ำ)`);
         const variations = generateCodeVariations(code);
         
         historySet.add(code);
@@ -2502,7 +2477,6 @@ async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallba
         }
         
         saveHistoryCallback();
-        await sleepCallback(5);
         return true;
     }
     
@@ -2653,7 +2627,7 @@ async function main() {
     }
 
     const targetUrl = config.youtube_url;
-    const youtubeChatTask = isMac && config.youtube_chat_enabled === true
+    const youtubeChatTask = config.youtube_chat_enabled === true
         ? youtubeChatLoop(targetUrl).catch(error => {
             log(`[YouTube Chat] ตัวอ่านแชตหยุดทำงาน: ${error?.message || error}`);
         })

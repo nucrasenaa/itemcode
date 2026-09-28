@@ -1171,6 +1171,17 @@ function normalizeItemcodeEvent(event) {
     };
 }
 
+function normalizeYoutubeChatEvent(event) {
+    if (!event || typeof event.text !== 'string' || !event.text.trim()) return null;
+    const parsedTime = new Date(event.time);
+    return {
+        id: String(event.id || '').slice(0, 256),
+        author: String(event.author || '').trim().slice(0, 120) || 'ผู้ชม',
+        text: event.text.trim().slice(0, 2000),
+        time: Number.isNaN(parsedTime.getTime()) ? new Date().toISOString() : parsedTime.toISOString()
+    };
+}
+
 function parseServiceLine(line) {
     const structured = line.match(/\[ITEMCODE\]\s*(\{.*\})/);
     if (structured) {
@@ -1200,6 +1211,15 @@ function consumeServiceOutput(chunk, bufferName) {
     for (const line of lines) {
         const event = parseServiceLine(line);
         if (event) send('service:itemcode', event);
+        const chatMatch = line.match(/\[YOUTUBE_CHAT\]\s*(\{.*\})/);
+        if (chatMatch) {
+            try {
+                const chatEvent = normalizeYoutubeChatEvent(JSON.parse(chatMatch[1]));
+                if (chatEvent) send('service:youtube-chat', chatEvent);
+            } catch (error) {
+                // Ignore malformed chat output; the raw line remains available in Service Debug Log.
+            }
+        }
     }
 }
 
@@ -1221,7 +1241,7 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         browser_redeem_headless: true,
         browser_token_login_enabled: true,
         browser_token_login_headless: true,
-        youtube_chat_enabled: process.platform === 'darwin' && Boolean(settings?.youtubeChatEnabled)
+        youtube_chat_enabled: Boolean(settings?.youtubeChatEnabled)
     });
     if (process.platform === 'win32') {
         // Do not keep the development-machine Documents path from the sample
@@ -1427,8 +1447,8 @@ ipcMain.handle('settings:load', () => {
         telegramEnabled: config.telegram_enabled !== false && Boolean(config.telegram_token && config.telegram_chat_id),
         discordWebhookUrls,
         discordEnabled: config.discord_enabled !== false && discordWebhookUrls.length > 0,
-        youtubeChatAvailable: process.platform === 'darwin',
-        youtubeChatEnabled: process.platform === 'darwin' && config.youtube_chat_enabled !== false
+        youtubeChatAvailable: true,
+        youtubeChatEnabled: config.youtube_chat_enabled !== false
     };
 });
 ipcMain.handle('settings:save', (_event, settings) => {
@@ -1443,7 +1463,7 @@ ipcMain.handle('settings:save', (_event, settings) => {
         telegram_chat_id: String(settings?.telegramChatId || '').trim(),
         telegram_enabled: Boolean(settings?.telegramEnabled),
         discord_enabled: Boolean(settings?.discordEnabled) && discordWebhookUrls.length > 0,
-        youtube_chat_enabled: process.platform === 'darwin' && Boolean(settings?.youtubeChatEnabled)
+        youtube_chat_enabled: Boolean(settings?.youtubeChatEnabled)
     });
     writeConfig(config);
     return { ok: true };

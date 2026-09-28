@@ -27,7 +27,6 @@ let accessToken = null;
 let currentLoggedInUser = null;
 let isAutoLoginDisabled = false;
 let hasNotifiedTokenExpired = false;
-let lastPeriodicSleepTime = Date.now();
 const discordDestinationCache = new Map();
 const discordNotificationCache = new Map();
 const DISCORD_DEDUP_WINDOW_MS = 10 * 60 * 1000;
@@ -1566,23 +1565,6 @@ async function retryCheckSerialAndNotify(serial, initialMessage) {
     return { retrySuccess: false, result: lastResult, sentTelegram: false, sentDiscord: false };
 }
 
-// Sleep OCR function helper
-async function sleepOcr(minutes, reason = 'notification') {
-    if (reason === 'periodic') {
-        log(`[*] ทำงานสแกนครบ 5 นาที: กำลังหยุดพักการสแกน OCR เป็นเวลา ${minutes} นาทีชั่วคราว... (สตรีมสดจะยังคงเล่นต่อไป)`);
-    } else {
-        log(`[*] ตรวจพบการส่งแจ้งเตือน: กำลังหยุดพักการสแกน OCR เป็นเวลา ${minutes} นาที... (สตรีมสดจะยังคงเล่นต่อไป)`);
-    }
-    const ms = minutes * 60 * 1000;
-    const segment = 1000; // 1 second
-    const totalSegments = ms / segment;
-    for (let i = 0; i < totalSegments && isRunning; i++) {
-        await sleep(segment);
-    }
-    lastPeriodicSleepTime = Date.now();
-    log(`[*] ครบ ${minutes} นาทีแล้ว เริ่มทำงานสแกน OCR ต่อ...`);
-}
-
 // Detect if URL is a YouTube channel
 function isYoutubeChannel(url) {
     const lower = url.toLowerCase();
@@ -1867,7 +1849,7 @@ async function processScan(directUrl) {
     if (codes.length > 0) {
         for (const code of codes) {
             if (!history.has(code)) {
-                if (await checkPrefixAndHandleDuplicate(code, history, saveHistory, sleepOcr)) {
+                if (checkPrefixAndHandleDuplicate(code, history, saveHistory)) {
                     break;
                 }
                 const variations = generateCodeVariations(code);
@@ -1958,9 +1940,6 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
-                            await sleepOcr(10);
-                        }
                         
                         success = true;
                         break;
@@ -2014,9 +1993,6 @@ async function processScan(directUrl) {
                         history.add(code);
                         saveHistory();
 
-                        if (sentTele || sentDisc) {
-                            await sleepOcr(10);
-                        }
                         
                         success = true;
                         break;
@@ -2046,16 +2022,9 @@ async function scanStreamLoop(videoUrl) {
     let cachedDirectUrl = null;
     let failureCount = 0;
     const maxFailures = 12; // tolerate temporary CDN/network failures without stopping the stream
-    lastPeriodicSleepTime = Date.now();
     let lastLiveCheckTime = Date.now();
 
     while (isRunning) {
-        // Periodic sleep: 2 minutes sleep every 5 minutes
-        if (Date.now() - lastPeriodicSleepTime >= 5 * 60 * 1000) {
-            await sleepOcr(2, 'periodic');
-            continue;
-        }
-
         // Check if stream has ended every 2 minutes
         if (Date.now() - lastLiveCheckTime >= 2 * 60 * 1000) {
             lastLiveCheckTime = Date.now();
@@ -2173,7 +2142,7 @@ function checkAndClearLogIfNewDay() {
     }
 }
 
-async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallback, sleepCallback) {
+function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallback) {
     const logPath = path.join(__dirname, 'notified_codes.log');
     
     // Check log rotation
@@ -2208,7 +2177,7 @@ async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallba
     }
     
     if (duplicateFound) {
-        log(`[!] ตรวจพบรหัส ${scannedPrefix} ซ้ำกับประวัติการแจ้งเตือน (ข้ามการทำงานและหยุดสแกน 5 นาที)`);
+        log(`[!] ตรวจพบรหัส ${scannedPrefix} ซ้ำกับประวัติการแจ้งเตือน (ข้ามรหัสซ้ำ)`);
         const variations = generateCodeVariations(code);
         
         historySet.add(code);
@@ -2217,7 +2186,6 @@ async function checkPrefixAndHandleDuplicate(code, historySet, saveHistoryCallba
         }
         
         saveHistoryCallback();
-        await sleepCallback(5);
         return true;
     }
     

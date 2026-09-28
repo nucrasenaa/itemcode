@@ -190,6 +190,26 @@
             </div>
         </section>
 
+        <section class="card youtube-chat-card" id="youtubeChatCard" hidden>
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">ข้อความจากผู้ชม</p>
+                    <h2>YouTube Live Chat</h2>
+                </div>
+                <div class="heading-actions">
+                    <span class="youtube-chat-count" id="youtubeChatCount">0 ความคิดเห็น</span>
+                    <button class="collapse-toggle" type="button" data-target="youtubeChatContent" aria-expanded="true">ย่อ</button>
+                    <button class="button button-ghost" id="clearYoutubeChat" type="button">ล้าง</button>
+                </div>
+            </div>
+            <div class="collapsible-content" id="youtubeChatContent">
+                <p class="section-note">แสดงคอมเมนต์ที่ดึงได้จาก YouTube Live Chat ระหว่างการทำงาน</p>
+                <div class="youtube-chat-list" id="youtubeChatMessages" role="log" aria-live="polite" aria-relevant="additions">
+                    <div class="empty-youtube-chat" id="emptyYoutubeChat">ยังไม่มีคอมเมนต์จาก YouTube Live Chat</div>
+                </div>
+            </div>
+        </section>
+
         <div class="modal-backdrop" id="itemcodeModal" hidden>
             <form class="test-modal" id="itemcodeForm">
                 <p class="section-kicker">ทดสอบการรับไอเทม</p>
@@ -217,10 +237,10 @@
                 </div>
                 <div class="changelog-list">
                     <article class="changelog-entry">
-                        <div class="changelog-version">เวอร์ชัน 0.2.8 (macOS)</div>
+                        <div class="changelog-version">เวอร์ชัน 0.2.9 (macOS / Windows)</div>
                         <ul>
-                            <li>เพิ่มการอ่าน YouTube Live Chat ควบคู่กับ OCR โดยไม่ต้องใช้ API Key</li>
-                            <li>ให้ ItemCode จากแชตแซงคิว OCR ที่รออยู่ และเพิ่มสวิตช์เปิด/ปิดการอ่านแชต</li>
+                            <li>เพิ่มการอ่านและแสดง YouTube Live Chat บน macOS และ Windows โดยไม่ต้องใช้ API Key</li>
+                            <li>ให้ ItemCode จากแชตแซงคิว OCR ที่รออยู่ และไม่หยุดพัก OCR หรือแชตระหว่างทำงาน</li>
                         </ul>
                     </article>
                     <article class="changelog-entry">

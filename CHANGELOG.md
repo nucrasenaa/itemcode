@@ -2,6 +2,18 @@
 
 การเปลี่ยนแปลงสำคัญของ `Equality ItemCode Watcher`
 
+## [0.2.9] - 2026-09-28
+
+### เพิ่ม
+
+- เปิดใช้ YouTube Live Chat บน Windows เพิ่มเติมจาก macOS
+- เพิ่ม section แสดงคอมเมนต์จาก YouTube Live Chat ต่อจาก Service Debug Log
+- แสดงชื่อผู้ส่ง เวลา และข้อความคอมเมนต์ พร้อมล้างและย่อ/ขยาย section ได้
+
+### แก้ไข
+
+- ยกเลิกช่วงหยุดพัก OCR อัตโนมัติ และไม่หยุดพักการอ่าน YouTube Live Chat
+
 ## [0.2.8] - 2026-09-28 (macOS)
 
 ### เพิ่ม

@@ -130,6 +130,15 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .empty-log { padding: 38px 12px 44px; color: #6f86a3; text-align: center; font-size: 12px; }
 .debug-card .section-note { margin-bottom: 12px; }
 .debug-log { min-height: 170px; max-height: 420px; margin: 0; overflow: auto; border: 1px solid rgba(165,190,225,.12); border-radius: 11px; padding: 13px; background: #071321; color: #b7c8dc; font: 11px/1.55 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.youtube-chat-count { border: 1px solid rgba(112,225,194,.16); border-radius: 999px; padding: 7px 10px; background: rgba(112,225,194,.08); color: var(--accent); font-size: 11px; white-space: nowrap; }
+.youtube-chat-card .section-note { margin-bottom: 12px; }
+.youtube-chat-list { display: grid; gap: 8px; max-height: 390px; overflow: auto; padding-right: 2px; }
+.youtube-chat-message { border: 1px solid rgba(165,190,225,.11); border-radius: 11px; padding: 10px 12px; background: rgba(5,15,28,.33); }
+.youtube-chat-message-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.youtube-chat-author { min-width: 0; overflow: hidden; color: #dffcf5; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.youtube-chat-time { flex: none; color: #7088a7; font-size: 10px; font-variant-numeric: tabular-nums; }
+.youtube-chat-text { margin: 6px 0 0; color: #c8d7e9; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.empty-youtube-chat { padding: 32px 12px; color: #6f86a3; text-align: center; font-size: 12px; }
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(1, 8, 17, .72); backdrop-filter: blur(8px); z-index: 10; }
 .modal-backdrop[hidden] { display: none; }
 .test-modal { width: min(420px, 100%); border: 1px solid var(--line); border-radius: 16px; padding: 22px; background: #10243d; box-shadow: 0 24px 80px rgba(0,0,0,.4); }

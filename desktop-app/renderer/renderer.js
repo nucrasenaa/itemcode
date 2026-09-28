@@ -9,6 +9,11 @@ const elements = {
     addItemcodeAccount: document.getElementById('addItemcodeAccount'),
     youtubeChatSettings: document.getElementById('youtubeChatSettings'),
     youtubeChatEnabled: document.getElementById('youtubeChatEnabled'),
+    youtubeChatCard: document.getElementById('youtubeChatCard'),
+    youtubeChatMessages: document.getElementById('youtubeChatMessages'),
+    emptyYoutubeChat: document.getElementById('emptyYoutubeChat'),
+    youtubeChatCount: document.getElementById('youtubeChatCount'),
+    clearYoutubeChat: document.getElementById('clearYoutubeChat'),
     discordWebhookList: document.getElementById('discordWebhookList'),
     addDiscordWebhook: document.getElementById('addDiscordWebhook'),
     startStop: document.getElementById('startStop'),
@@ -41,6 +46,8 @@ let running = false;
 let eventCount = 0;
 let toastTimer = null;
 let debugLogStarted = false;
+let youtubeChatCount = 0;
+const renderedYoutubeChatIds = new Set();
 let itemcodeAccounts = [{ username: '', password: '' }];
 let discordWebhooks = [{ url: '' }];
 let draggedAccountIndex = null;
@@ -386,6 +393,7 @@ function setInputs(values) {
     document.getElementById('telegramChatId').value = values?.telegramChatId || '';
     document.getElementById('telegramEnabled').checked = Boolean(values?.telegramEnabled);
     elements.youtubeChatSettings.hidden = values?.youtubeChatAvailable !== true;
+    elements.youtubeChatCard.hidden = values?.youtubeChatAvailable !== true;
     elements.youtubeChatEnabled.checked = values?.youtubeChatAvailable === true
         && values?.youtubeChatEnabled !== false;
     renderDiscordWebhooks(normalizeDiscordWebhooks(values));
@@ -393,7 +401,9 @@ function setInputs(values) {
 }
 
 function setRunning(value, mode = 'running') {
-    running = Boolean(value);
+    const nextRunning = Boolean(value);
+    if (!running && nextRunning) clearYoutubeChatMessages();
+    running = nextRunning;
     elements.runState.dataset.running = String(running);
     elements.runStateText.textContent = !running
         ? 'หยุดทำงาน'
@@ -603,6 +613,55 @@ function addServiceLog(entry) {
     elements.debugLog.scrollTop = elements.debugLog.scrollHeight;
 }
 
+function clearYoutubeChatMessages() {
+    elements.youtubeChatMessages.replaceChildren();
+    elements.youtubeChatMessages.append(elements.emptyYoutubeChat);
+    elements.emptyYoutubeChat.hidden = false;
+    youtubeChatCount = 0;
+    renderedYoutubeChatIds.clear();
+    elements.youtubeChatCount.textContent = '0 ความคิดเห็น';
+}
+
+function addYoutubeChatMessage(message) {
+    const text = String(message?.text || '').trim();
+    if (!text) return;
+    const id = String(message?.id || '').slice(0, 256);
+    if (id && renderedYoutubeChatIds.has(id)) return;
+    if (id) {
+        renderedYoutubeChatIds.add(id);
+        if (renderedYoutubeChatIds.size > 500) {
+            renderedYoutubeChatIds.delete(renderedYoutubeChatIds.values().next().value);
+        }
+    }
+
+    elements.emptyYoutubeChat.hidden = true;
+    const row = document.createElement('article');
+    row.className = 'youtube-chat-message';
+    const header = document.createElement('div');
+    header.className = 'youtube-chat-message-header';
+    const author = document.createElement('span');
+    author.className = 'youtube-chat-author';
+    author.textContent = String(message?.author || 'ผู้ชม');
+    const time = document.createElement('time');
+    time.className = 'youtube-chat-time';
+    const parsedTime = new Date(message?.time || Date.now());
+    time.dateTime = Number.isNaN(parsedTime.getTime()) ? new Date().toISOString() : parsedTime.toISOString();
+    time.textContent = Number.isNaN(parsedTime.getTime())
+        ? new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : parsedTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const body = document.createElement('p');
+    body.className = 'youtube-chat-text';
+    body.textContent = text;
+    header.append(author, time);
+    row.append(header, body);
+    elements.youtubeChatMessages.prepend(row);
+    youtubeChatCount += 1;
+    while (elements.youtubeChatMessages.querySelectorAll('.youtube-chat-message').length > 200) {
+        elements.youtubeChatMessages.querySelector('article.youtube-chat-message:last-of-type')?.remove();
+    }
+    elements.youtubeChatCount.textContent = `${youtubeChatCount} ความคิดเห็น`;
+}
+
 async function toggleService() {
     if (running) {
         await api.stop();
@@ -792,6 +851,7 @@ for (const button of document.querySelectorAll('.collapse-toggle')) {
 }
 restoreSectionState('accountContent');
 restoreSectionState('debugContent');
+restoreSectionState('youtubeChatContent');
 elements.itemcodeForm.addEventListener('submit', async event => {
     event.preventDefault();
     const code = elements.testItemcodeValue.value.trim().toUpperCase();
@@ -814,6 +874,7 @@ document.getElementById('discordEnabled').addEventListener('change', () => {
 elements.youtubeChatEnabled.addEventListener('change', () => {
     markConfigDirty();
 });
+elements.clearYoutubeChat.addEventListener('click', clearYoutubeChatMessages);
 
 api.onServiceState(state => {
     setRunning(state.running, state.mode);
@@ -827,6 +888,7 @@ api.onServiceState(state => {
 });
 api.onItemcodeEvent(addItemcodeEvent);
 api.onServiceLog(addServiceLog);
+api.onYoutubeChat(addYoutubeChatMessage);
 api.onUpdateState(setUpdateState);
 api.onUpdateNotification(notification => {
     if (notification?.body) showToast(`${notification.title ? `${notification.title}: ` : ''}${notification.body}`);

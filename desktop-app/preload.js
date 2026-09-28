@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld('itemcodeDesktop', {
         ipcRenderer.on('service:log', listener);
         return () => ipcRenderer.removeListener('service:log', listener);
     },
+    onYoutubeChat: (callback) => {
+        const listener = (_event, message) => callback(message);
+        ipcRenderer.on('service:youtube-chat', listener);
+        return () => ipcRenderer.removeListener('service:youtube-chat', listener);
+    },
     onUpdateState: (callback) => {
         const listener = (_event, state) => callback(state);
         ipcRenderer.on('update:state', listener);
