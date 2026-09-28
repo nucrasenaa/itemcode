@@ -5,6 +5,8 @@ const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
 const { extractCodes } = require('./ocr-code-utils');
+const { parseYoutubeChatTarget, youtubeChatMessageText } = require('./youtube-chat-utils');
+const { createDetectedCodeQueue } = require('./detected-code-queue');
 const util = require('util');
 const crypto = require('crypto');
 
@@ -34,9 +36,18 @@ let autoLoginPromise = null;
 let lastAutoLoginAttemptAt = 0;
 const AUTO_LOGIN_RETRY_INTERVAL_MS = 30000;
 let lastPeriodicSleepTime = Date.now();
+let activeYoutubeChat = null;
 const discordDestinationCache = new Map();
 const discordNotificationCache = new Map();
 const DISCORD_DEDUP_WINDOW_MS = 10 * 60 * 1000;
+const detectedCodeQueue = createDetectedCodeQueue(async (code, source) => {
+    try {
+        return await processDetectedCodes([code], source);
+    } catch (error) {
+        log(`[${source}] การประมวลผล ItemCode ล้มเหลว: ${error?.message || error}`);
+        throw error;
+    }
+});
 
 // Logger
 function log(msg) {
@@ -2001,33 +2012,11 @@ async function runOcr(imagePath) {
     }
 }
 
-// Process single scanning round
-async function processScan(directUrl) {
-    const captured = await captureFrame(directUrl, TEMP_FRAME);
-    if (!captured) {
-        return { success: false, reason: "FFmpeg frame extraction failed" };
-    }
-
-    const lines = await runOcr(TEMP_FRAME);
-
-    // Clean up temporary image frame
-    try {
-        if (fs.existsSync(TEMP_FRAME)) {
-            fs.unlinkSync(TEMP_FRAME);
-        }
-    } catch (e) { }
-
-    if (lines.length > 0) {
-        const preview = lines.slice(0, 3)
-            .map(line => typeof line === 'string' ? line : line.text)
-            .join(', ') + (lines.length > 3 ? '...' : '');
-        log(`[*] OCR read: "${preview}"`);
-    } else {
-        log(`[*] OCR: No text detected on screen`);
-    }
-
-    const codes = extractCodes(lines, config.regex_pattern);
+async function processDetectedCodes(codes, source = 'OCR') {
     if (codes.length > 0) {
+        if (source !== 'OCR') {
+            log(`[${source}] ตรวจพบข้อความตามรูปแบบ ItemCode เดิม: ${codes.length} รายการ`);
+        }
         for (const code of codes) {
             if (!history.has(code)) {
                 if (await checkPrefixAndHandleDuplicate(code, history, saveHistory, sleepOcr)) {
@@ -2185,6 +2174,46 @@ async function processScan(directUrl) {
     return { success: true };
 }
 
+function enqueueDetectedCodes(codes, source = 'OCR') {
+    return detectedCodeQueue.enqueue(codes, source);
+}
+
+// Process single scanning round
+async function processScan(directUrl) {
+    const captured = await captureFrame(directUrl, TEMP_FRAME);
+    if (!captured) {
+        return { success: false, reason: "FFmpeg frame extraction failed" };
+    }
+
+    const lines = await runOcr(TEMP_FRAME);
+
+    // Clean up temporary image frame
+    try {
+        if (fs.existsSync(TEMP_FRAME)) {
+            fs.unlinkSync(TEMP_FRAME);
+        }
+    } catch (e) { }
+
+    if (lines.length > 0) {
+        const preview = lines.slice(0, 3)
+            .map(line => typeof line === 'string' ? line : line.text)
+            .join(', ') + (lines.length > 3 ? '...' : '');
+        log(`[*] OCR read: "${preview}"`);
+    } else {
+        log(`[*] OCR: No text detected on screen`);
+    }
+
+    const codes = extractCodes(lines, config.regex_pattern);
+    return enqueueDetectedCodes(codes, 'OCR');
+}
+
+async function processYoutubeChatItem(chatItem) {
+    const messageText = youtubeChatMessageText(chatItem);
+    if (!messageText) return { success: true };
+    const codes = extractCodes([messageText], config.regex_pattern);
+    return enqueueDetectedCodes(codes, 'YouTube Chat');
+}
+
 // Sleep function helper
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -2275,6 +2304,100 @@ async function scanStreamLoop(videoUrl) {
 
     log(`[*] ปิดระบบสแกนสตรีม ${videoUrl}`);
     return { ended: notLiveCount >= 3 };
+}
+
+async function youtubeChatLoop(sourceUrl) {
+    if (!isMac || config.youtube_chat_enabled !== true) return;
+
+    let LiveChat;
+    try {
+        ({ LiveChat } = require('youtube-chat-next'));
+    } catch (error) {
+        log('[YouTube Chat] ไม่พบ youtube-chat-next ใน service runtime');
+        return;
+    }
+
+    const initialTarget = parseYoutubeChatTarget(sourceUrl);
+    const channelMode = isYoutubeChannel(sourceUrl);
+    if (!initialTarget && !channelMode) {
+        log('[YouTube Chat] URL ที่ตั้งไว้ไม่รองรับการอ่านแชต ข้ามการเชื่อมต่อ');
+        return;
+    }
+
+    log('[YouTube Chat] เริ่มอ่าน Live Chat ควบคู่กับ OCR (โหมด Live chat)');
+    while (isRunning) {
+        let target = initialTarget;
+        if (!target && channelMode) {
+            const liveVideoUrl = await checkChannelLive(sourceUrl);
+            target = parseYoutubeChatTarget(liveVideoUrl);
+            if (!target) {
+                await waitForYoutubeChatRetry(30000);
+                continue;
+            }
+        }
+
+        const chat = new LiveChat(target, 5000, 'live');
+        activeYoutubeChat = chat;
+        let lastErrorName = '';
+        let resolveEnded;
+        const ended = new Promise(resolve => { resolveEnded = resolve; });
+        chat.once('end', reason => resolveEnded(reason));
+        chat.on('start', liveId => {
+            log(`[YouTube Chat] เชื่อมต่อแชตของไลฟ์แล้ว (${liveId})`);
+        });
+        chat.on('error', error => {
+            lastErrorName = String(error?.name || 'Error').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+            log(`[YouTube Chat] ${lastErrorName || 'เกิดข้อผิดพลาด'}; ไลบรารีกำลังจัดการ retry`);
+        });
+        chat.on('chat', chatItem => {
+            void processYoutubeChatItem(chatItem).catch(error => {
+                log(`[YouTube Chat] ส่งข้อความเข้า pipeline ไม่สำเร็จ: ${error?.message || error}`);
+            });
+        });
+
+        let started = false;
+        try {
+            started = await chat.start();
+        } catch (error) {
+            lastErrorName = String(error?.name || 'Error');
+        }
+        if (!started) {
+            if (activeYoutubeChat === chat) activeYoutubeChat = null;
+            if (!isRunning) break;
+            if (lastErrorName === 'ScrapeError' || lastErrorName === 'ParseError') {
+                log(`[YouTube Chat] หยุดอ่าน เนื่องจากรูปแบบหน้า YouTube เปลี่ยน (${lastErrorName})`);
+                break;
+            }
+            await waitForYoutubeChatRetry(channelMode ? 30000 : 15000);
+            continue;
+        }
+
+        const endReason = await ended;
+        if (activeYoutubeChat === chat) activeYoutubeChat = null;
+        if (!isRunning) break;
+        if (String(endReason || '').includes('Live stream ended') && !channelMode) {
+            log('[YouTube Chat] ไลฟ์ที่ระบุจบแล้ว หยุดอ่านแชต');
+            break;
+        }
+        if (lastErrorName === 'ScrapeError' || lastErrorName === 'ParseError') {
+            log(`[YouTube Chat] หยุดอ่าน เนื่องจากรูปแบบหน้า YouTube เปลี่ยน (${lastErrorName})`);
+            break;
+        }
+        log(`[YouTube Chat] การเชื่อมต่อจบ (${String(endReason || 'ไม่ทราบสาเหตุ').slice(0, 100)}); จะลองเชื่อมใหม่`);
+        await waitForYoutubeChatRetry(channelMode ? 15000 : 30000);
+    }
+
+    if (activeYoutubeChat) {
+        activeYoutubeChat.stop('Service stopped');
+        activeYoutubeChat = null;
+    }
+}
+
+async function waitForYoutubeChatRetry(ms) {
+    const endAt = Date.now() + ms;
+    while (isRunning && Date.now() < endAt) {
+        await sleep(Math.min(1000, endAt - Date.now()));
+    }
 }
 
 function clearLogFiles() {
@@ -2530,6 +2653,11 @@ async function main() {
     }
 
     const targetUrl = config.youtube_url;
+    const youtubeChatTask = isMac && config.youtube_chat_enabled === true
+        ? youtubeChatLoop(targetUrl).catch(error => {
+            log(`[YouTube Chat] ตัวอ่านแชตหยุดทำงาน: ${error?.message || error}`);
+        })
+        : null;
 
     if (isYoutubeChannel(targetUrl)) {
         log(`[*] ตรวจพบลิงก์ประเภทช่อง YouTube กำลังเข้าสู่โหมดเฝ้าระวังไลฟ์สตรีม...`);
@@ -2557,12 +2685,17 @@ async function main() {
             await sleep(30000);
         }
     }
+
+    isRunning = false;
+    if (activeYoutubeChat) activeYoutubeChat.stop('OCR scanner stopped');
+    if (youtubeChatTask) await youtubeChatTask;
 }
 
 // Graceful Shutdown
 process.on('SIGINT', () => {
     log('\n[-] ได้รับสัญญาณหยุดทำงาน (SIGINT) กำลังปิดระบบ...');
     isRunning = false;
+    if (activeYoutubeChat) activeYoutubeChat.stop('Service stopped');
     // Clean up temporary files
     try {
         if (fs.existsSync(TEMP_FRAME)) {
@@ -2575,6 +2708,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
     log('\n[-] ได้รับสัญญาณหยุดทำงาน (SIGTERM) กำลังปิดระบบ...');
     isRunning = false;
+    if (activeYoutubeChat) activeYoutubeChat.stop('Service stopped');
     // Clean up temporary files
     try {
         if (fs.existsSync(TEMP_FRAME)) {

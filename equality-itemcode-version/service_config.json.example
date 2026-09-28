@@ -2,6 +2,10 @@
   // แหล่งวิดีโอ/ไลฟ์ที่ระบบจะดึงภาพไปสแกนหา itemcode
   "youtube_url": "https://www.youtube.com/@thehof.talesrunner",
 
+  // macOS: อ่าน YouTube Live Chat ควบคู่กับ OCR โดยใช้แหล่ง URL เดียวกัน
+  // ปิดได้ในหน้าตั้งค่าเดสก์ท็อป; ไม่ต้องใช้ API Key
+  "youtube_chat_enabled": true,
+
   // Discord: เพิ่ม Webhook ได้หลายรายการ ระบบจะส่งไปทุกรายการเมื่อเปิดใช้งาน
   // ใช้เงื่อนไขเดียวกับ node_service และปล่อย array ว่างได้
   "discord_webhook_url": [],

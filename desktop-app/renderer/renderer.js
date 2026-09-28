@@ -7,6 +7,8 @@ const elements = {
     workspaceCard: document.getElementById('workspaceCard'),
     itemcodeAccountsList: document.getElementById('itemcodeAccountsList'),
     addItemcodeAccount: document.getElementById('addItemcodeAccount'),
+    youtubeChatSettings: document.getElementById('youtubeChatSettings'),
+    youtubeChatEnabled: document.getElementById('youtubeChatEnabled'),
     discordWebhookList: document.getElementById('discordWebhookList'),
     addDiscordWebhook: document.getElementById('addDiscordWebhook'),
     startStop: document.getElementById('startStop'),
@@ -369,6 +371,7 @@ function inputValues() {
         telegramToken: document.getElementById('telegramToken').value,
         telegramChatId: document.getElementById('telegramChatId').value,
         telegramEnabled: document.getElementById('telegramEnabled').checked,
+        youtubeChatEnabled: elements.youtubeChatEnabled.checked,
         discordWebhookUrls: webhookUrls,
         discordEnabled: document.getElementById('discordEnabled').checked
     };
@@ -382,6 +385,9 @@ function setInputs(values) {
     document.getElementById('telegramToken').value = values?.telegramToken || '';
     document.getElementById('telegramChatId').value = values?.telegramChatId || '';
     document.getElementById('telegramEnabled').checked = Boolean(values?.telegramEnabled);
+    elements.youtubeChatSettings.hidden = values?.youtubeChatAvailable !== true;
+    elements.youtubeChatEnabled.checked = values?.youtubeChatAvailable === true
+        && values?.youtubeChatEnabled !== false;
     renderDiscordWebhooks(normalizeDiscordWebhooks(values));
     document.getElementById('discordEnabled').checked = Boolean(values?.discordEnabled);
 }
@@ -803,6 +809,9 @@ document.getElementById('telegramEnabled').addEventListener('change', () => {
     markConfigDirty();
 });
 document.getElementById('discordEnabled').addEventListener('change', () => {
+    markConfigDirty();
+});
+elements.youtubeChatEnabled.addEventListener('change', () => {
     markConfigDirty();
 });
 

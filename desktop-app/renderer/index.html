@@ -77,6 +77,20 @@
                 </div>
                 <div class="itemcode-account-list" id="itemcodeAccountsList"></div>
               </div>
+              <div class="youtube-chat-box" id="youtubeChatSettings" hidden>
+                <div class="telegram-heading">
+                    <div>
+                        <span class="telegram-title">อ่าน YouTube Live Chat พร้อม OCR</span>
+                        <span class="telegram-note">อ่านข้อความจากแหล่ง YouTube เดียวกับ OCR แล้วใช้เงื่อนไขตรวจ ItemCode เดิม</span>
+                    </div>
+                    <label class="switch-label">
+                        <input id="youtubeChatEnabled" type="checkbox" />
+                        <span class="switch"></span>
+                        <span>เปิดใช้งาน</span>
+                    </label>
+                </div>
+                <p class="youtube-chat-warning">ไม่ต้องใช้ API Key; ตัวอ่านแชตเป็นไลบรารีไม่เป็นทางการและอาจหยุดทำงานเมื่อ YouTube เปลี่ยนระบบ</p>
+              </div>
               <div class="telegram-box">
                 <div class="telegram-heading">
                     <div>
@@ -202,6 +216,13 @@
                     <button class="button button-ghost" id="closeChangelog" type="button">ปิด</button>
                 </div>
                 <div class="changelog-list">
+                    <article class="changelog-entry">
+                        <div class="changelog-version">เวอร์ชัน 0.2.8 (macOS)</div>
+                        <ul>
+                            <li>เพิ่มการอ่าน YouTube Live Chat ควบคู่กับ OCR โดยไม่ต้องใช้ API Key</li>
+                            <li>ให้ ItemCode จากแชตแซงคิว OCR ที่รออยู่ และเพิ่มสวิตช์เปิด/ปิดการอ่านแชต</li>
+                        </ul>
+                    </article>
                     <article class="changelog-entry">
                         <div class="changelog-version">เวอร์ชัน 0.2.5</div>
                         <ul>

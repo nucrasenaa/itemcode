@@ -4,7 +4,7 @@
   "description": "ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รองรับ macOS, Windows และ Ubuntu/Linux พร้อมแจ้งเตือนผ่าน Telegram แบบเลือกใช้ได้",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/code-ocr-utils.test.js",
+    "test": "node --test test/code-ocr-utils.test.js test/youtube-chat-utils.test.js test/detected-code-queue.test.js",
     "test:ocr": "node test/ocr-fixtures.test.js",
     "test:login": "node playwright_login.mjs",
     "test:login:show": "node browser_login_test.mjs --show-chromium"
@@ -16,6 +16,7 @@
   "dependencies": {
     "cloakbrowser": "^0.3.30",
     "playwright": "^1.62.1",
-    "puppeteer-core": "^25.0.4"
+    "puppeteer-core": "^25.0.4",
+    "youtube-chat-next": "3.1.0"
   }
 }

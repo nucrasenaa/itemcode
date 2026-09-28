@@ -493,6 +493,8 @@ function ensureRuntimeDirectory() {
         'ocr_helper.ps1',
         'ocr_image_preprocessor.cs',
         'ocr-code-utils.js',
+        'youtube-chat-utils.js',
+        'detected-code-queue.js',
         'ocr_helper.swift',
         'service_config.json.example'
     ]) {
@@ -1218,7 +1220,8 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
         browser_redeem_enabled: itemcodeAccounts.length > 0,
         browser_redeem_headless: true,
         browser_token_login_enabled: true,
-        browser_token_login_headless: true
+        browser_token_login_headless: true,
+        youtube_chat_enabled: process.platform === 'darwin' && Boolean(settings?.youtubeChatEnabled)
     });
     if (process.platform === 'win32') {
         // Do not keep the development-machine Documents path from the sample
@@ -1245,12 +1248,17 @@ async function startService(settings, serviceArgs = [], mode = 'running') {
     serviceOutputBuffer = '';
     serviceErrorBuffer = '';
     serviceMode = mode;
+    const serviceNodePath = app.isPackaged
+        ? path.join(process.resourcesPath, 'equality-itemcode-version', 'node_modules')
+        : path.resolve(__dirname, '..', 'equality-itemcode-version', 'node_modules');
+    const inheritedNodePath = process.env.NODE_PATH || '';
     serviceProcess = spawn(node.command || (process.platform === 'win32' ? 'node.exe' : 'node'), ['index.js', ...serviceArgs], {
         cwd: runtime,
         env: toolEnvironment({
             PLAYWRIGHT_BROWSERS_PATH: path.join(appDataDir(), 'playwright-browsers'),
             BROWSER_TOKEN_LOGIN_HEADLESS: 'true',
-            BROWSER_REDEEM_HEADLESS: 'true'
+            BROWSER_REDEEM_HEADLESS: 'true',
+            NODE_PATH: [serviceNodePath, inheritedNodePath].filter(Boolean).join(path.delimiter)
         }),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe']
@@ -1418,7 +1426,9 @@ ipcMain.handle('settings:load', () => {
         telegramChatId: config.telegram_chat_id || '',
         telegramEnabled: config.telegram_enabled !== false && Boolean(config.telegram_token && config.telegram_chat_id),
         discordWebhookUrls,
-        discordEnabled: config.discord_enabled !== false && discordWebhookUrls.length > 0
+        discordEnabled: config.discord_enabled !== false && discordWebhookUrls.length > 0,
+        youtubeChatAvailable: process.platform === 'darwin',
+        youtubeChatEnabled: process.platform === 'darwin' && config.youtube_chat_enabled !== false
     };
 });
 ipcMain.handle('settings:save', (_event, settings) => {
@@ -1432,7 +1442,8 @@ ipcMain.handle('settings:save', (_event, settings) => {
         telegram_token: String(settings?.telegramToken || ''),
         telegram_chat_id: String(settings?.telegramChatId || '').trim(),
         telegram_enabled: Boolean(settings?.telegramEnabled),
-        discord_enabled: Boolean(settings?.discordEnabled) && discordWebhookUrls.length > 0
+        discord_enabled: Boolean(settings?.discordEnabled) && discordWebhookUrls.length > 0,
+        youtube_chat_enabled: process.platform === 'darwin' && Boolean(settings?.youtubeChatEnabled)
     });
     writeConfig(config);
     return { ok: true };

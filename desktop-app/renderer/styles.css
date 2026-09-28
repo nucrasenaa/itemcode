@@ -88,6 +88,8 @@ h2 { margin-bottom: 0; font-size: 19px; }
 .remove-account { padding: 9px 10px; white-space: nowrap; }
 .telegram-box { margin-top: 20px; border: 1px solid rgba(112,225,194,.16); border-radius: 13px; padding: 15px; background: rgba(7, 25, 37, .38); }
 .discord-box { margin-top: 20px; border: 1px solid rgba(114,140,255,.2); border-radius: 13px; padding: 15px; background: rgba(20, 23, 58, .3); }
+.youtube-chat-box { margin-top: 20px; border: 1px solid rgba(255,91,91,.16); border-radius: 13px; padding: 15px; background: rgba(36, 17, 27, .28); }
+.youtube-chat-warning { margin: 12px 0 0; color: #c7a8a8; font-size: 10px; line-height: 1.5; }
 .telegram-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .notification-heading-actions { display: inline-flex; align-items: center; gap: 10px; }
 .telegram-title, .telegram-note { display: block; }
