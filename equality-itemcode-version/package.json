@@ -4,10 +4,11 @@
   "description": "ระบบสแกนโค้ดไอเทมอัตโนมัติแบบรันเบื้องหลัง (Headless) รองรับ macOS, Windows และ Ubuntu/Linux พร้อมแจ้งเตือนผ่าน Telegram แบบเลือกใช้ได้",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test/code-ocr-utils.test.js test/youtube-chat-utils.test.js test/detected-code-queue.test.js",
+    "test": "node --test test/code-ocr-utils.test.js test/youtube-chat-utils.test.js test/detected-code-queue.test.js test/mac-ocr-runner.test.js",
     "test:ocr": "node test/ocr-fixtures.test.js",
     "test:login": "node playwright_login.mjs",
-    "test:login:show": "node browser_login_test.mjs --show-chromium"
+    "test:login:show": "node browser_login_test.mjs --show-chromium",
+    "build:ocr:mac": "swiftc -O -target \"$(uname -m)-apple-macosx12.0\" ocr_helper.swift -o ocr_helper"
   },
   "keywords": [],
   "author": "",

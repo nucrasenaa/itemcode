@@ -4,7 +4,7 @@ import AppKit
 
 let arguments = CommandLine.arguments
 guard arguments.count > 1 else {
-    print("Usage: ocr_helper <image-path>")
+    FileHandle.standardError.write(Data("Usage: ocr_helper <image-path> [--fast]\n".utf8))
     exit(1)
 }
 
@@ -12,7 +12,7 @@ let imagePath = arguments[1]
 let imageURL = URL(fileURLWithPath: imagePath)
 
 guard let ciImage = CIImage(contentsOf: imageURL) else {
-    print("Error: Could not load image from path: \(imagePath)")
+    FileHandle.standardError.write(Data("Error: Could not load image from path: \(imagePath)\n".utf8))
     exit(1)
 }
 
@@ -20,8 +20,8 @@ let requestHandler = VNImageRequestHandler(ciImage: ciImage, options: [:])
 
 let request = VNRecognizeTextRequest { (request, error) in
     if let error = error {
-        print("OCR Error: \(error.localizedDescription)")
-        return
+        FileHandle.standardError.write(Data("OCR Error: \(error.localizedDescription)\n".utf8))
+        exit(1)
     }
     
     guard let observations = request.results as? [VNRecognizedTextObservation] else {
@@ -34,13 +34,14 @@ let request = VNRecognizeTextRequest { (request, error) in
     }
 }
 
-request.recognitionLevel = .accurate
+// Fast mode avoids the accurate model/Neural Engine path if it stalls.
+request.recognitionLevel = arguments.contains("--fast") ? .fast : .accurate
 request.recognitionLanguages = ["en-US"]
 request.usesLanguageCorrection = false
 
 do {
     try requestHandler.perform([request])
 } catch {
-    print("Failed to perform OCR request: \(error.localizedDescription)")
+    FileHandle.standardError.write(Data("Failed to perform OCR request: \(error.localizedDescription)\n".utf8))
     exit(1)
 }

@@ -1,6 +1,6 @@
 {
   "name": "itemcode-desktop",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Cross-platform desktop UI for equality-itemcode-version",
   "main": "main.js",
   "type": "commonjs",
@@ -37,6 +37,7 @@
           "ocr_image_preprocessor.cs",
           "ocr-code-utils.js",
           "youtube-chat-utils.js",
+          "mac-ocr-runner.js",
           "detected-code-queue.js",
           "ocr_helper.swift",
           "service_config.json.example",

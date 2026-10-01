@@ -7,6 +7,8 @@ const { execFile } = require('child_process');
 const { extractCodes } = require('./ocr-code-utils');
 const { parseYoutubeChatTarget, youtubeChatMessageText } = require('./youtube-chat-utils');
 const { createDetectedCodeQueue } = require('./detected-code-queue');
+const { createMacOcrRunner } = require('./mac-ocr-runner');
+const runMacOcr = createMacOcrRunner({ log });
 const util = require('util');
 const crypto = require('crypto');
 
@@ -1977,20 +1979,11 @@ async function runOcr(imagePath) {
             return [];
         }
     } else {
-        const ocrBinary = ocrPath;
+        const ocrBinary = path.resolve(__dirname, ocrPath);
         if (!fs.existsSync(ocrBinary)) {
-            log(`[-] OCR Error: Swift binary not found at ${ocrBinary}`);
-            return [];
+            throw new Error(`Swift OCR binary not found at ${ocrBinary}`);
         }
-        try {
-            const { stdout } = await execFileAsync(ocrBinary, [imagePath], { timeout: 10000 });
-            return stdout.split('\n')
-                .map(line => line.trim())
-                .filter(line => line.length > 0);
-        } catch (e) {
-            log(`[-] Swift OCR binary run failed: ${e.message}`);
-            return [];
-        }
+        return runMacOcr(ocrBinary, imagePath);
     }
 }
 
@@ -2159,14 +2152,15 @@ async function processScan(directUrl) {
         return { success: false, reason: "FFmpeg frame extraction failed" };
     }
 
-    const lines = await runOcr(TEMP_FRAME);
-
-    // Clean up temporary image frame
+    let lines;
     try {
-        if (fs.existsSync(TEMP_FRAME)) {
-            fs.unlinkSync(TEMP_FRAME);
-        }
-    } catch (e) { }
+        lines = await runOcr(TEMP_FRAME);
+    } catch (error) {
+        log(`[-] OCR อ่านภาพไม่สำเร็จ: ${String(error.message || error).replace(/\s+/g, ' ').slice(0, 1000)}`);
+        return { success: false, reason: 'OCR execution failed' };
+    } finally {
+        try { if (fs.existsSync(TEMP_FRAME)) fs.unlinkSync(TEMP_FRAME); } catch (_) { }
+    }
 
     if (lines.length > 0) {
         const preview = lines.slice(0, 3)

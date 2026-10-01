@@ -494,6 +494,7 @@ function ensureRuntimeDirectory() {
         'ocr_image_preprocessor.cs',
         'ocr-code-utils.js',
         'youtube-chat-utils.js',
+        'mac-ocr-runner.js',
         'detected-code-queue.js',
         'ocr_helper.swift',
         'service_config.json.example'
